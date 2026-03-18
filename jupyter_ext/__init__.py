@@ -41,20 +41,32 @@ def get_git_remote_url(dir_path: Path):
         return None
 
 
-def get_directory_tree(dir_path: Path, rel_base: Path) -> list:
+SKIP_DIRS = {
+    '__pycache__', 'node_modules', '.git', '.venv', 'venv',
+    '.Trash', 'Library', '.cache', '.local', '.npm', '.nvm',
+    '.zsh_sessions', '.ipython',
+}
+
+
+def get_directory_listing(dir_path: Path, rel_base: Path) -> list:
+    """List a single directory level (non-recursive). Fast."""
     items = []
     try:
         entries = sorted(dir_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
     except PermissionError:
         return items
     for entry in entries:
+        if entry.name.startswith('.') and entry.name not in ('.bkit', '.claude'):
+            continue
+        if entry.name in SKIP_DIRS:
+            continue
         rel = str(entry.relative_to(rel_base))
         if entry.is_dir():
             node = {
                 "name": entry.name,
                 "path": rel,
                 "type": "directory",
-                "children": get_directory_tree(entry, rel_base),
+                "has_children": True,
             }
             repo_url = get_git_remote_url(entry)
             if repo_url:
@@ -120,7 +132,13 @@ class WorkspaceTreeHandler(IPythonHandler):
     @web.authenticated
     def get(self):
         workspace = self.settings["workspace_viewer_path"]
-        tree = get_directory_tree(workspace, workspace)
+        sub = self.get_argument("path", "")
+        if sub and not is_safe_path(workspace, sub):
+            raise web.HTTPError(400, "Invalid path")
+        target = (workspace / sub).resolve() if sub else workspace
+        if not target.is_dir():
+            raise web.HTTPError(404, "Directory not found")
+        tree = get_directory_listing(target, workspace)
         self.set_header("Content-Type", "application/json; charset=utf-8")
         self.finish(json.dumps(tree, ensure_ascii=False))
 

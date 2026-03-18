@@ -65,13 +65,20 @@
         }
     });
 
-    // === Load tree ===
+    // === Load tree (lazy) ===
+    async function fetchTreeLevel(dirPath) {
+        const base = window.__VIEWER_BASE || '';
+        const url = dirPath
+            ? `${base}/api/tree?path=${encodeURIComponent(dirPath)}`
+            : `${base}/api/tree`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('Failed to load tree');
+        return res.json();
+    }
+
     async function loadTree() {
         try {
-            const base = window.__VIEWER_BASE || '';
-            const res = await fetch(base + '/api/tree');
-            if (!res.ok) throw new Error('Failed to load tree');
-            const data = await res.json();
+            const data = await fetchTreeLevel('');
             treeEl.innerHTML = '';
             renderTree(data, treeEl, 0);
         } catch (err) {
@@ -103,17 +110,25 @@
 
                 const children = document.createElement('div');
                 children.className = 'tree-children';
+                let loaded = false;
 
-                label.addEventListener('click', () => {
+                label.addEventListener('click', async () => {
                     const isOpen = children.classList.toggle('open');
                     label.querySelector('.icon').innerHTML = isOpen ? '&#9660;' : '&#9654;';
+                    if (isOpen && !loaded) {
+                        loaded = true;
+                        try {
+                            const subItems = await fetchTreeLevel(item.path);
+                            renderTree(subItems, children, depth + 1);
+                        } catch (e) {
+                            children.innerHTML = '<div class="tree-item" style="opacity:0.5">Error loading</div>';
+                        }
+                    }
                 });
 
                 dirEl.appendChild(label);
                 dirEl.appendChild(children);
                 parent.appendChild(dirEl);
-
-                renderTree(item.children || [], children, depth + 1);
             } else {
                 const fileEl = document.createElement('div');
                 fileEl.className = 'tree-item';
