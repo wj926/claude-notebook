@@ -552,11 +552,21 @@
         });
 
         // Load terminal list
+        let lastTerminalJson = '';  // cache to skip unnecessary re-renders
+
         async function loadTerminals() {
             try {
                 const res = await fetch(JUPYTER + '/api/terminals');
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
+                // Skip re-render if terminal list hasn't changed
+                const newJson = JSON.stringify(data.map(t => t.name).sort());
+                if (newJson === lastTerminalJson) {
+                    // Just update terminalData silently
+                    data.forEach(t => { terminalData[t.name] = t; });
+                    return;
+                }
+                lastTerminalJson = newJson;
                 terminalData = {};
                 const activeNames = new Set();
                 data.forEach(t => {
@@ -787,8 +797,13 @@
                         const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30;
                         userScrolledUp = !atBottom;
                     });
+                    // Scroll to bottom when switching to a terminal
+                    requestAnimationFrame(() => {
+                        viewport.scrollTop = viewport.scrollHeight;
+                        userScrolledUp = false;
+                        updateScrollbar();
+                    });
                 }
-                updateScrollbar();
             }, 50);
 
             // WebSocket
