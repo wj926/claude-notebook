@@ -795,33 +795,47 @@
                 fitAddon.fit();
                 const viewport = terminalContainer.querySelector('.xterm-viewport');
                 if (viewport) {
-                    // Override scrollTop property on this specific element
+                    // Prevent browser auto-scroll-anchoring
+                    viewport.style.overflowAnchor = 'none';
+
+                    // Save native scroll methods before overriding
                     const proto = Object.getPrototypeOf(viewport);
                     const desc = Object.getOwnPropertyDescriptor(proto, 'scrollTop')
                               || Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
                     const nativeSet = desc.set;
                     const nativeGet = desc.get;
+                    const nativeScrollTo = viewport.scrollTo.bind(viewport);
+                    const nativeScroll = viewport.scroll.bind(viewport);
+                    const nativeScrollBy = viewport.scrollBy.bind(viewport);
 
+                    // Block scrollTop setter when locked
                     Object.defineProperty(viewport, 'scrollTop', {
                         get() { return nativeGet.call(this); },
                         set(val) {
-                            if (!followMode) {
-                                // In locked mode, only allow user-initiated scrolls
-                                // (which come through the native scroll mechanism, not direct assignment)
-                                // Block all programmatic scrollTop sets
-                                return;
-                            }
+                            if (!followMode) return;  // block
                             nativeSet.call(this, val);
                         },
                         configurable: true,
                     });
 
-                    // User scroll: wheel/touch changes followMode
+                    // Block scrollTo/scroll/scrollBy when locked
+                    viewport.scrollTo = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollTo(...args);
+                    };
+                    viewport.scroll = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollTo(...args);
+                    };
+                    viewport.scrollBy = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollBy(...args);
+                    };
+
+                    // User scroll: wheel/touch
                     let scrollTimeout = null;
                     viewport.addEventListener('wheel', (e) => {
-                        // Temporarily allow native scroll for this interaction
                         const current = nativeGet.call(viewport);
-                        // Apply wheel delta manually since we blocked scrollTop setter
                         if (!followMode) {
                             nativeSet.call(viewport, current - e.deltaY * (e.deltaMode === 1 ? 20 : 1));
                         }
