@@ -755,7 +755,35 @@
 
             // Create xterm
             terminalContainer.innerHTML = '';
-            let userScrolledUp = false;  // track if user manually scrolled away from bottom
+
+            // === Scroll lock system ===
+            // Instead of trying to fix scroll after each write(),
+            // we run a RAF loop that continuously enforces the correct scroll position.
+            let scrollMode = 'follow';  // 'follow' = stick to bottom, 'locked' = stay at user position
+            let lockedScrollTop = 0;
+            let ignoreScrollEvents = false;  // flag to ignore programmatic scroll changes
+
+            function scrollEnforce() {
+                const viewport = terminalContainer.querySelector('.xterm-viewport');
+                if (viewport) {
+                    if (scrollMode === 'follow') {
+                        const target = viewport.scrollHeight - viewport.clientHeight;
+                        if (Math.abs(viewport.scrollTop - target) > 5) {
+                            ignoreScrollEvents = true;
+                            viewport.scrollTop = target;
+                            ignoreScrollEvents = false;
+                        }
+                    } else if (scrollMode === 'locked') {
+                        if (Math.abs(viewport.scrollTop - lockedScrollTop) > 5) {
+                            ignoreScrollEvents = true;
+                            viewport.scrollTop = lockedScrollTop;
+                            ignoreScrollEvents = false;
+                        }
+                    }
+                    updateScrollbar();
+                }
+                scrollLockRafId = requestAnimationFrame(scrollEnforce);
+            }
 
             currentTerm = new Terminal({
                 cursorBlink: true,
@@ -788,21 +816,35 @@
 
             setTimeout(() => {
                 fitAddon.fit();
-                // Hook scroll for custom scrollbar + track user scroll intent
                 const viewport = terminalContainer.querySelector('.xterm-viewport');
                 if (viewport) {
-                    viewport.addEventListener('scroll', () => {
-                        updateScrollbar();
-                        // Detect if user scrolled away from bottom
+                    // Detect user scroll intent (mouse wheel / touch)
+                    viewport.addEventListener('wheel', () => {
                         const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30;
-                        userScrolledUp = !atBottom;
-                    });
-                    // Scroll to bottom when switching to a terminal
-                    requestAnimationFrame(() => {
-                        viewport.scrollTop = viewport.scrollHeight;
-                        userScrolledUp = false;
+                        if (atBottom) {
+                            scrollMode = 'follow';
+                        } else {
+                            scrollMode = 'locked';
+                            lockedScrollTop = viewport.scrollTop;
+                        }
+                    }, { passive: true });
+                    viewport.addEventListener('touchmove', () => {
+                        const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30;
+                        if (atBottom) {
+                            scrollMode = 'follow';
+                        } else {
+                            scrollMode = 'locked';
+                            lockedScrollTop = viewport.scrollTop;
+                        }
+                    }, { passive: true });
+                    // Also track scroll events but only from user interaction
+                    viewport.addEventListener('scroll', () => {
+                        if (ignoreScrollEvents) return;
                         updateScrollbar();
                     });
+                    // Start scroll enforcement loop
+                    scrollMode = 'follow';
+                    scrollLockRafId = requestAnimationFrame(scrollEnforce);
                 }
             }, 50);
 
@@ -822,20 +864,7 @@
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg[0] === 'stdout') {
-                        const viewport = terminalContainer.querySelector('.xterm-viewport');
-                        const savedScrollTop = viewport ? viewport.scrollTop : 0;
-                        currentTerm.write(msg[1], () => {
-                            // After write completes, fix scroll position
-                            if (!viewport) return;
-                            if (userScrolledUp) {
-                                // User was reading history — restore their scroll position
-                                viewport.scrollTop = savedScrollTop;
-                            } else {
-                                // User was at bottom — keep following output
-                                viewport.scrollTop = viewport.scrollHeight;
-                            }
-                            updateScrollbar();
-                        });
+                        currentTerm.write(msg[1]);
                     } else if (msg[0] === 'disconnect') {
                         statusDot.classList.add('disconnected');
                     }
@@ -892,7 +921,12 @@
             resizeObserver.observe(terminalContainer);
         }
 
+        let scrollLockRafId = null;  // shared ref for cleanup
         function disconnect() {
+            if (scrollLockRafId) {
+                cancelAnimationFrame(scrollLockRafId);
+                scrollLockRafId = null;
+            }
             if (currentWs) {
                 currentWs.close();
                 currentWs = null;
