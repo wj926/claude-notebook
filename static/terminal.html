@@ -756,34 +756,11 @@
             // Create xterm
             terminalContainer.innerHTML = '';
 
-            // === Scroll lock system ===
-            // RAF loop enforces scroll position, but pauses during user interaction
-            // so the browser can process wheel/touch scrolling naturally.
-            let scrollMode = 'follow';  // 'follow' = stick to bottom, 'locked' = stay at user position
-            let lockedScrollTop = 0;
-            let userInteracting = false;  // true while user is actively scrolling
-            let interactionTimer = null;
-
-            function scrollEnforce() {
-                // Don't enforce while user is actively scrolling
-                if (!userInteracting) {
-                    const viewport = terminalContainer.querySelector('.xterm-viewport');
-                    if (viewport) {
-                        if (scrollMode === 'follow') {
-                            const target = viewport.scrollHeight - viewport.clientHeight;
-                            if (Math.abs(viewport.scrollTop - target) > 5) {
-                                viewport.scrollTop = target;
-                            }
-                        } else if (scrollMode === 'locked') {
-                            if (Math.abs(viewport.scrollTop - lockedScrollTop) > 5) {
-                                viewport.scrollTop = lockedScrollTop;
-                            }
-                        }
-                        updateScrollbar();
-                    }
-                }
-                scrollLockRafId = requestAnimationFrame(scrollEnforce);
-            }
+            // === Scroll lock: intercept scrollTop at the property level ===
+            // xterm.js sets viewport.scrollTop programmatically during write().
+            // We override the property so that when user has scrolled up,
+            // ALL programmatic scrollTop changes are silently ignored.
+            let followMode = true;  // true = auto-scroll to bottom
 
             currentTerm = new Terminal({
                 cursorBlink: true,
@@ -818,28 +795,50 @@
                 fitAddon.fit();
                 const viewport = terminalContainer.querySelector('.xterm-viewport');
                 if (viewport) {
-                    // When user starts scrolling, pause enforcement to let browser handle it
-                    function onUserScroll() {
-                        userInteracting = true;
-                        scrollMode = 'locked';
-                        if (interactionTimer) clearTimeout(interactionTimer);
-                        // After user stops scrolling, check position and resume enforcement
-                        interactionTimer = setTimeout(() => {
-                            userInteracting = false;
-                            const atBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30;
-                            if (atBottom) {
-                                scrollMode = 'follow';
-                            } else {
-                                lockedScrollTop = viewport.scrollTop;
+                    // Override scrollTop property on this specific element
+                    const proto = Object.getPrototypeOf(viewport);
+                    const desc = Object.getOwnPropertyDescriptor(proto, 'scrollTop')
+                              || Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+                    const nativeSet = desc.set;
+                    const nativeGet = desc.get;
+
+                    Object.defineProperty(viewport, 'scrollTop', {
+                        get() { return nativeGet.call(this); },
+                        set(val) {
+                            if (!followMode) {
+                                // In locked mode, only allow user-initiated scrolls
+                                // (which come through the native scroll mechanism, not direct assignment)
+                                // Block all programmatic scrollTop sets
+                                return;
                             }
-                        }, 200);
-                    }
-                    viewport.addEventListener('wheel', onUserScroll, { passive: true });
-                    viewport.addEventListener('touchmove', onUserScroll, { passive: true });
+                            nativeSet.call(this, val);
+                        },
+                        configurable: true,
+                    });
+
+                    // User scroll: wheel/touch changes followMode
+                    let scrollTimeout = null;
+                    viewport.addEventListener('wheel', (e) => {
+                        // Temporarily allow native scroll for this interaction
+                        const current = nativeGet.call(viewport);
+                        // Apply wheel delta manually since we blocked scrollTop setter
+                        if (!followMode) {
+                            nativeSet.call(viewport, current - e.deltaY * (e.deltaMode === 1 ? 20 : 1));
+                        }
+                        clearTimeout(scrollTimeout);
+                        scrollTimeout = setTimeout(() => {
+                            const atBottom = viewport.scrollHeight - nativeGet.call(viewport) - viewport.clientHeight < 30;
+                            followMode = atBottom;
+                            updateScrollbar();
+                        }, 150);
+                    }, { passive: true });
+
                     viewport.addEventListener('scroll', () => { updateScrollbar(); });
-                    // Start scroll enforcement loop
-                    scrollMode = 'follow';
-                    scrollLockRafId = requestAnimationFrame(scrollEnforce);
+
+                    // Initial: scroll to bottom
+                    followMode = true;
+                    nativeSet.call(viewport, viewport.scrollHeight);
+                    updateScrollbar();
                 }
             }, 50);
 
@@ -916,12 +915,7 @@
             resizeObserver.observe(terminalContainer);
         }
 
-        let scrollLockRafId = null;  // shared ref for cleanup
         function disconnect() {
-            if (scrollLockRafId) {
-                cancelAnimationFrame(scrollLockRafId);
-                scrollLockRafId = null;
-            }
             if (currentWs) {
                 currentWs.close();
                 currentWs = null;
