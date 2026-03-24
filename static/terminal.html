@@ -554,11 +554,21 @@
         });
 
         // Load terminal list
+        let lastTerminalJson = '';  // cache to skip unnecessary re-renders
+
         async function loadTerminals() {
             try {
                 const res = await fetch(JUPYTER + '/api/terminals');
                 if (!res.ok) throw new Error('Failed');
                 const data = await res.json();
+                // Skip re-render if terminal list hasn't changed
+                const newJson = JSON.stringify(data.map(t => t.name).sort());
+                if (newJson === lastTerminalJson) {
+                    // Just update terminalData silently
+                    data.forEach(t => { terminalData[t.name] = t; });
+                    return;
+                }
+                lastTerminalJson = newJson;
                 terminalData = {};
                 const activeNames = new Set();
                 data.forEach(t => {
@@ -752,6 +762,13 @@
 
             // Create xterm
             terminalContainer.innerHTML = '';
+
+            // === Scroll lock: intercept scrollTop at the property level ===
+            // xterm.js sets viewport.scrollTop programmatically during write().
+            // We override the property so that when user has scrolled up,
+            // ALL programmatic scrollTop changes are silently ignored.
+            let followMode = true;  // true = auto-scroll to bottom
+
             currentTerm = new Terminal({
                 cursorBlink: true,
                 fontSize: 14,
@@ -771,7 +788,7 @@
                     white: '#d4d4d4',
                 },
                 scrollback: 10000,
-                smoothScrollDuration: 100,
+                smoothScrollDuration: 0,
                 allowProposedApi: true,
             });
 
@@ -783,10 +800,71 @@
 
             setTimeout(() => {
                 fitAddon.fit();
-                // Hook scroll for custom scrollbar
                 const viewport = terminalContainer.querySelector('.xterm-viewport');
-                if (viewport) viewport.addEventListener('scroll', updateScrollbar);
-                updateScrollbar();
+                if (viewport) {
+                    // Prevent browser auto-scroll-anchoring
+                    viewport.style.overflowAnchor = 'none';
+
+                    // Save native scroll methods before overriding
+                    const proto = Object.getPrototypeOf(viewport);
+                    const desc = Object.getOwnPropertyDescriptor(proto, 'scrollTop')
+                              || Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+                    const nativeSet = desc.set;
+                    const nativeGet = desc.get;
+                    const nativeScrollTo = viewport.scrollTo.bind(viewport);
+                    const nativeScroll = viewport.scroll.bind(viewport);
+                    const nativeScrollBy = viewport.scrollBy.bind(viewport);
+
+                    // Block scrollTop setter when locked
+                    Object.defineProperty(viewport, 'scrollTop', {
+                        get() { return nativeGet.call(this); },
+                        set(val) {
+                            if (!followMode) return;  // block
+                            nativeSet.call(this, val);
+                        },
+                        configurable: true,
+                    });
+
+                    // Block scrollTo/scroll/scrollBy when locked
+                    viewport.scrollTo = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollTo(...args);
+                    };
+                    viewport.scroll = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollTo(...args);
+                    };
+                    viewport.scrollBy = function(...args) {
+                        if (!followMode) return;
+                        nativeScrollBy(...args);
+                    };
+
+                    // User scroll: wheel/touch
+                    let scrollTimeout = null;
+                    viewport.addEventListener('wheel', (e) => {
+                        const current = nativeGet.call(viewport);
+                        // Scrolling up → immediately lock
+                        if (e.deltaY < 0) {
+                            followMode = false;
+                        }
+                        // Apply wheel delta manually (works in both modes)
+                        nativeSet.call(viewport, current - e.deltaY * (e.deltaMode === 1 ? 20 : 1));
+                        // After scrolling stops, check if back at bottom
+                        clearTimeout(scrollTimeout);
+                        scrollTimeout = setTimeout(() => {
+                            const atBottom = viewport.scrollHeight - nativeGet.call(viewport) - viewport.clientHeight < 30;
+                            followMode = atBottom;
+                            updateScrollbar();
+                        }, 150);
+                    }, { passive: true });
+
+                    viewport.addEventListener('scroll', () => { updateScrollbar(); });
+
+                    // Initial: scroll to bottom
+                    followMode = true;
+                    nativeSet.call(viewport, viewport.scrollHeight);
+                    updateScrollbar();
+                }
             }, 50);
 
             // WebSocket
@@ -827,17 +905,37 @@
                 }
             });
 
-            // Handle resize
+            // Handle resize (debounced to prevent scroll thrashing)
+            let resizeTimer = null;
             const resizeObserver = new ResizeObserver(() => {
-                if (fitAddon && currentTerm) {
-                    fitAddon.fit();
-                    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                        const dims = fitAddon.proposeDimensions();
-                        if (dims) {
-                            currentWs.send(JSON.stringify(["set_size", dims.rows, dims.cols]));
+                if (resizeTimer) clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    if (fitAddon && currentTerm) {
+                        const viewport = terminalContainer.querySelector('.xterm-viewport');
+                        const savedTop = viewport ? viewport.scrollTop : 0;
+                        const wasAtBottom = viewport
+                            ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30
+                            : true;
+                        fitAddon.fit();
+                        // Restore scroll after fit recalculates viewport
+                        if (viewport) {
+                            requestAnimationFrame(() => {
+                                if (wasAtBottom) {
+                                    viewport.scrollTop = viewport.scrollHeight;
+                                } else {
+                                    viewport.scrollTop = savedTop;
+                                }
+                                updateScrollbar();
+                            });
+                        }
+                        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                            const dims = fitAddon.proposeDimensions();
+                            if (dims) {
+                                currentWs.send(JSON.stringify(["set_size", dims.rows, dims.cols]));
+                            }
                         }
                     }
-                }
+                }, 100);
             });
             resizeObserver.observe(terminalContainer);
         }

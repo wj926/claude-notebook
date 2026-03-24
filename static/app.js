@@ -65,13 +65,25 @@
         }
     });
 
-    // === Load tree ===
+    // === Load tree (lazy) ===
+    const fetchOpts = {
+        headers: { 'ngrok-skip-browser-warning': '1' },
+        credentials: 'same-origin',
+    };
+
+    async function fetchTreeLevel(dirPath) {
+        const base = window.__VIEWER_BASE || '';
+        const url = dirPath
+            ? `${base}/api/tree?path=${encodeURIComponent(dirPath)}`
+            : `${base}/api/tree`;
+        const res = await fetch(url, fetchOpts);
+        if (!res.ok) throw new Error('Failed to load tree');
+        return res.json();
+    }
+
     async function loadTree() {
         try {
-            const base = window.__VIEWER_BASE || '';
-            const res = await fetch(base + '/api/tree');
-            if (!res.ok) throw new Error('Failed to load tree');
-            const data = await res.json();
+            const data = await fetchTreeLevel('');
             treeEl.innerHTML = '';
             renderTree(data, treeEl, 0);
         } catch (err) {
@@ -103,17 +115,25 @@
 
                 const children = document.createElement('div');
                 children.className = 'tree-children';
+                let loaded = false;
 
-                label.addEventListener('click', () => {
+                label.addEventListener('click', async () => {
                     const isOpen = children.classList.toggle('open');
                     label.querySelector('.icon').innerHTML = isOpen ? '&#9660;' : '&#9654;';
+                    if (isOpen && !loaded) {
+                        loaded = true;
+                        try {
+                            const subItems = await fetchTreeLevel(item.path);
+                            renderTree(subItems, children, depth + 1);
+                        } catch (e) {
+                            children.innerHTML = '<div class="tree-item" style="opacity:0.5">Error loading</div>';
+                        }
+                    }
                 });
 
                 dirEl.appendChild(label);
                 dirEl.appendChild(children);
                 parent.appendChild(dirEl);
-
-                renderTree(item.children || [], children, depth + 1);
             } else {
                 const fileEl = document.createElement('div');
                 fileEl.className = 'tree-item';
@@ -150,8 +170,11 @@
     async function loadFile(path) {
         try {
             const base = window.__VIEWER_BASE || '';
-            const res = await fetch(`${base}/api/file?path=${encodeURIComponent(path)}`);
-            if (!res.ok) throw new Error('Failed to load file');
+            const res = await fetch(`${base}/api/file?path=${encodeURIComponent(path)}`, fetchOpts);
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(`HTTP ${res.status}: ${text.substring(0, 100)}`);
+            }
             const data = await res.json();
 
             // Breadcrumb
@@ -160,16 +183,18 @@
 
             const isMarkdown = ['.md', '.markdown'].includes(data.extension);
 
-            if (isMarkdown) {
+            if (isMarkdown && typeof marked !== 'undefined') {
                 const html = marked.parse(data.content);
                 contentEl.innerHTML = `
                     <div class="breadcrumb">${breadcrumb}</div>
                     <div class="markdown-body">${html}</div>
                 `;
                 // Apply syntax highlighting to code blocks
-                contentEl.querySelectorAll('pre code').forEach((block) => {
-                    hljs.highlightElement(block);
-                });
+                if (typeof hljs !== 'undefined') {
+                    contentEl.querySelectorAll('pre code').forEach((block) => {
+                        hljs.highlightElement(block);
+                    });
+                }
             } else {
                 contentEl.innerHTML = `
                     <div class="breadcrumb">${breadcrumb}</div>
@@ -177,7 +202,8 @@
                 `;
             }
         } catch (err) {
-            contentEl.innerHTML = `<div class="welcome"><p>Error loading file.</p></div>`;
+            contentEl.innerHTML = `<div class="welcome"><p>Error: ${escHtml(err.message)}</p></div>`;
+            console.error('loadFile error:', err);
         }
     }
 
