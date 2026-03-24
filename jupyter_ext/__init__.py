@@ -44,7 +44,7 @@ def get_git_remote_url(dir_path: Path):
 SKIP_DIRS = {
     '__pycache__', 'node_modules', '.git', '.venv', 'venv',
     '.Trash', 'Library', '.cache', '.local', '.npm', '.nvm',
-    '.zsh_sessions', '.ipython',
+    '.zsh_sessions', '.ipython', '.claude',
 }
 
 
@@ -56,8 +56,6 @@ def get_directory_listing(dir_path: Path, rel_base: Path) -> list:
     except PermissionError:
         return items
     for entry in entries:
-        if entry.name.startswith('.') and entry.name not in ('.bkit',):
-            continue
         if entry.name in SKIP_DIRS:
             continue
         rel = str(entry.relative_to(rel_base))
