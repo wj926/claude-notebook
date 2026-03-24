@@ -493,37 +493,55 @@
         let fitAddon = null;
         let terminalData = {};  // name -> {display_name, last_activity}
 
-        // Server-synced display names (shared across all devices)
+        // Server-synced terminal config (slot-based, shared across devices)
+        // Format: {slot: {display_name, command}}
         const NAMES_API = BASE + '/api/terminal-names';
-        let serverNames = {};
+        let serverSlots = {};  // {slot: {display_name, command}}
 
-        async function fetchServerNames() {
+        async function fetchServerSlots() {
             try {
                 const res = await fetch(NAMES_API);
-                if (res.ok) serverNames = await res.json();
+                if (res.ok) serverSlots = await res.json();
             } catch (e) { /* ignore */ }
         }
-        async function setServerName(name, displayName) {
-            serverNames[name] = displayName;
+
+        // Map terminal session names to slots by order
+        function buildSlotMap(terminals) {
+            const sorted = [...terminals].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+            const map = {};  // termName -> slot
+            sorted.forEach((t, i) => { map[t.name] = String(i + 1); });
+            return map;
+        }
+        let slotMap = {};  // termName -> slot
+
+        async function setServerSlot(slot, displayName, command) {
+            serverSlots[slot] = { display_name: displayName, command: command || "" };
             try {
                 await fetch(NAMES_API, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-XSRFToken': getXsrf() },
-                    body: JSON.stringify({ name, display_name: displayName }),
+                    body: JSON.stringify({ slot, display_name: displayName, command: command || "" }),
                 });
             } catch (e) { /* ignore */ }
         }
-        async function removeServerName(name) {
-            delete serverNames[name];
+        async function removeServerSlot(slot) {
+            delete serverSlots[slot];
             try {
-                await fetch(NAMES_API + '?name=' + encodeURIComponent(name), {
+                await fetch(NAMES_API + '?slot=' + encodeURIComponent(slot), {
                     method: 'DELETE',
                     headers: { 'X-XSRFToken': getXsrf() },
                 });
             } catch (e) { /* ignore */ }
+            await fetchServerSlots();
+        }
+        function getSlotConfig(termName) {
+            const slot = slotMap[termName];
+            if (slot && serverSlots[slot]) return serverSlots[slot];
+            return null;
         }
         function getDisplayName(t) {
-            if (serverNames[t.name]) return serverNames[t.name];
+            const cfg = getSlotConfig(t.name);
+            if (cfg && cfg.display_name) return cfg.display_name;
             return t.display_name || ('Terminal ' + t.name);
         }
 
@@ -570,12 +588,11 @@
                 }
                 lastTerminalJson = newJson;
                 terminalData = {};
-                const activeNames = new Set();
                 data.forEach(t => {
                     terminalData[t.name] = t;
-                    activeNames.add(t.name);
                 });
-                await fetchServerNames();
+                await fetchServerSlots();
+                slotMap = buildSlotMap(data);
                 renderList(data);
             } catch (e) {
                 termList.innerHTML = '<div class="term-empty">Error loading terminals</div>';
@@ -626,40 +643,27 @@
         }
 
         function startRename(nameEl, termName) {
-            nameEl.contentEditable = 'true';
-            nameEl.focus();
-            // Select all text
-            const range = document.createRange();
-            range.selectNodeContents(nameEl);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-
-            function finishRename() {
-                nameEl.contentEditable = 'false';
-                const newName = nameEl.textContent.trim();
-                if (newName && newName !== getDisplayName(terminalData[termName] || {name: termName})) {
-                    renameTerminal(termName, newName);
-                }
-                nameEl.removeEventListener('blur', finishRename);
-                nameEl.removeEventListener('keydown', onKey);
-            }
-            function onKey(e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    nameEl.blur();
-                } else if (e.key === 'Escape') {
-                    nameEl.textContent = getDisplayName(terminalData[termName] || {name: termName});
-                    nameEl.blur();
-                }
-            }
-            nameEl.addEventListener('blur', finishRename);
-            nameEl.addEventListener('keydown', onKey);
+            showConfigPrompt(termName);
         }
 
-        async function renameTerminal(name, displayName) {
-            // Save locally (always works, even with Jupyter)
-            await setServerName(name, displayName);
+        function showConfigPrompt(termName) {
+            const cfg = getSlotConfig(termName) || {};
+            const currentDisplay = cfg.display_name || getDisplayName(terminalData[termName] || {name: termName});
+            const currentCmd = cfg.command || "";
+
+            const newName = prompt('Terminal name:', currentDisplay);
+            if (newName === null) return;  // cancelled
+            const newCmd = prompt('Startup command (leave empty for none):', currentCmd);
+            if (newCmd === null) return;  // cancelled
+
+            const finalName = newName.trim() || currentDisplay;
+            renameTerminal(termName, finalName, newCmd.trim());
+        }
+
+        async function renameTerminal(name, displayName, command) {
+            const slot = slotMap[name];
+            if (!slot) return;
+            await setServerSlot(slot, displayName, command);
             // Try API rename too (works with standalone server)
             try {
                 await fetch(JUPYTER + '/api/terminals/' + name, {
@@ -725,7 +729,8 @@
                     method: 'DELETE',
                     headers: { 'X-XSRFToken': getXsrf() },
                 });
-                await removeServerName(name);
+                const slot = slotMap[name];
+                if (slot) await removeServerSlot(slot);
                 if (name === currentName) {
                     disconnect();
                     currentName = null;
@@ -968,11 +973,7 @@
         // Rename button in toolbar
         renameBtn.addEventListener('click', () => {
             if (!currentName) return;
-            const current = currentDisplayName || ('Terminal ' + currentName);
-            const newName = prompt('Rename terminal:', current);
-            if (newName && newName.trim() && newName.trim() !== current) {
-                renameTerminal(currentName, newName.trim());
-            }
+            showConfigPrompt(currentName);
         });
 
         // Input bar

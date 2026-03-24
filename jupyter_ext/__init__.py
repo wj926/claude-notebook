@@ -83,14 +83,23 @@ NAMES_FILE = Path(__file__).parent.parent / ".terminal_names.json"
 
 
 def _read_names():
+    """Read terminal config. Format: {slot: {display_name, command}} or legacy {name: displayName}."""
     try:
-        return json.loads(NAMES_FILE.read_text(encoding="utf-8"))
+        data = json.loads(NAMES_FILE.read_text(encoding="utf-8"))
+        # Migrate legacy format: {name: "displayName"} -> {slot: {display_name, command}}
+        if data and all(isinstance(v, str) for v in data.values()):
+            migrated = {}
+            for i, (k, v) in enumerate(data.items(), 1):
+                migrated[str(i)] = {"display_name": v, "command": ""}
+            _write_names(migrated)
+            return migrated
+        return data
     except Exception:
         return {}
 
 
 def _write_names(data):
-    NAMES_FILE.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    NAMES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class TerminalNamesHandler(IPythonHandler):
@@ -102,24 +111,29 @@ class TerminalNamesHandler(IPythonHandler):
     @web.authenticated
     def put(self):
         body = json.loads(self.request.body)
-        name = body.get("name")
-        display_name = body.get("display_name")
-        if not name or not display_name:
-            raise web.HTTPError(400, "name and display_name required")
+        slot = body.get("slot")
+        display_name = body.get("display_name", "")
+        command = body.get("command", "")
+        if not slot:
+            raise web.HTTPError(400, "slot required")
         names = _read_names()
-        names[name] = display_name
+        names[str(slot)] = {"display_name": display_name, "command": command}
         _write_names(names)
         self.set_header("Content-Type", "application/json; charset=utf-8")
         self.finish(json.dumps({"ok": True}))
 
     @web.authenticated
     def delete(self):
-        name = self.get_argument("name", None)
-        if not name:
-            raise web.HTTPError(400, "name required")
+        slot = self.get_argument("slot", None)
+        if not slot:
+            raise web.HTTPError(400, "slot required")
         names = _read_names()
-        names.pop(name, None)
-        _write_names(names)
+        names.pop(str(slot), None)
+        # Re-index slots to keep them sequential
+        reindexed = {}
+        for i, key in enumerate(sorted(names.keys(), key=lambda x: int(x)), 1):
+            reindexed[str(i)] = names[key]
+        _write_names(reindexed)
         self.set_header("Content-Type", "application/json; charset=utf-8")
         self.finish(json.dumps({"ok": True}))
 
@@ -218,6 +232,40 @@ def _jupyter_server_extension_paths():
     return [{"module": "jupyter_ext"}]
 
 
+def _auto_create_terminals(nb_app):
+    """Create terminals from saved config on server startup."""
+    from tornado.ioloop import IOLoop
+
+    def _create():
+        term_mgr = nb_app.web_app.settings.get('terminal_manager')
+        if term_mgr is None:
+            return
+        saved = _read_names()
+        if not saved:
+            return
+        for slot in sorted(saved.keys(), key=lambda x: int(x)):
+            cfg = saved[slot]
+            try:
+                model = term_mgr.create()
+                name = model["name"]
+                command = cfg.get("command", "")
+                if command:
+                    term = term_mgr.get_terminal(name)
+                    def _send_cmd(t=term, cmd=command):
+                        try:
+                            t.ptyproc.write(cmd + "\r")
+                        except Exception:
+                            pass
+                    IOLoop.current().call_later(1.5, _send_cmd)
+                nb_app.log.info("Auto-created terminal %s (slot %s: %s)",
+                                name, slot, cfg.get("display_name", ""))
+            except Exception as e:
+                nb_app.log.warning("Failed to auto-create terminal for slot %s: %s", slot, e)
+
+    # Delay to ensure terminal manager is fully ready
+    IOLoop.current().call_later(2, _create)
+
+
 def load_jupyter_server_extension(nb_app):
     workspace = Path(nb_app.notebook_dir).resolve()
     nb_app.web_app.settings["workspace_viewer_path"] = workspace
@@ -238,3 +286,6 @@ def load_jupyter_server_extension(nb_app):
     ]
     nb_app.web_app.add_handlers(".*$", handlers)
     nb_app.log.info("Workspace Viewer extension loaded at %s/workspace-viewer (workspace: %s)", base_url, workspace)
+
+    # Auto-create saved terminals
+    _auto_create_terminals(nb_app)
