@@ -42,8 +42,8 @@ jupyter notebook
 
 자세한 설정 가이드와 사용법은 블로그 글을 참조하세요:
 
-- **English**: [Workspace Viewer: A Self-Hosted Claude Code Remote Alternative via Jupyter Notebook](https://harry24k.github.io/tool/2026/03/17/workspace-viewer-eng.html)
-- **한국어**: [Workspace Viewer: Jupyter Notebook를 활용한 셀프 호스팅 Claude Code Remote 대안](https://harry24k.github.io/tool/2026/03/17/workspace-viewer.html)
+- **English**: [Workspace Viewer: A Self-Hosted Claude Code Remote Alternative via Jupyter Notebook](https://trustworthyai.co.kr/article/2026/workspace-viewer-eng/)
+- **한국어**: [Workspace Viewer: Jupyter Notebook를 활용한 셀프 호스팅 Claude Code Remote 대안](https://trustworthyai.co.kr/article/2026/workspace-viewer/)
 
 ## 라이선스
 
