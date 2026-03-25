@@ -289,12 +289,20 @@
         }
     }
 
-    // === Drag & Drop upload on finder grid ===
-    finderGrid.addEventListener('dragover', (e) => { e.preventDefault(); finderGrid.classList.add('dragover'); });
-    finderGrid.addEventListener('dragleave', () => { finderGrid.classList.remove('dragover'); });
-    finderGrid.addEventListener('drop', async (e) => {
+    // === Prevent browser from opening dropped files ===
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => e.preventDefault());
+
+    // === Drag & Drop upload on finder area ===
+    finder.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); finder.classList.add('dragover'); });
+    finder.addEventListener('dragleave', (e) => {
+        // Only remove highlight when leaving the finder element itself
+        if (!finder.contains(e.relatedTarget)) finder.classList.remove('dragover');
+    });
+    finder.addEventListener('drop', async (e) => {
         e.preventDefault();
-        finderGrid.classList.remove('dragover');
+        e.stopPropagation();
+        finder.classList.remove('dragover');
         if (e.dataTransfer.files.length) {
             await uploadFiles(e.dataTransfer.files, currentFinderPath);
         }

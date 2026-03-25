@@ -323,10 +323,13 @@ html, body {
     font-size: 14px;
 }
 /* Drop zone highlight */
-.finder-grid.dragover {
+.finder.dragover {
     background: rgba(46, 170, 220, 0.06);
-    border: 2px dashed var(--accent);
+    outline: 2px dashed var(--accent);
+    outline-offset: -2px;
     border-radius: 8px;
+}
+.finder.dragover .finder-grid {
     min-height: 120px;
 }
 /* Context menu */
