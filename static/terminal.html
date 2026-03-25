@@ -530,37 +530,36 @@
         .chat-messages {
             flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             overscroll-behavior-y: contain;
-            padding: 0;
+            padding: 8px 0;
             background: #f6f8fa;
             font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', 'Menlo', monospace, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
             font-size: 13px;
-            line-height: 1.55;
+            line-height: 1.5;
             color: #1f2328;
-            white-space: pre;
-            tab-size: 8;
-            -moz-tab-size: 8;
         }
         /* Each line in the terminal */
         .chat-line {
             padding: 0 14px;
-            min-height: 1.55em;
+            min-height: 1.5em;
+            white-space: pre;
+            overflow-x: auto;
         }
         /* Prompt lines — blue highlight */
         .chat-line.prompt {
             background: #007aff;
             color: #fff;
-            padding: 3px 14px;
-            margin: 4px 0;
+            padding: 2px 14px;
+            margin: 6px 8px;
             border-radius: 6px;
-            margin-left: 8px;
-            margin-right: 8px;
+            white-space: pre;
         }
         .chat-line.prompt span { color: #fff !important; }
-        /* Blank separator between blocks */
+        /* Blank line */
         .chat-line.blank {
-            height: 4px;
+            height: 0.5em;
         }
         @keyframes typingBounce {
             0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
@@ -1530,8 +1529,8 @@
         function bufferLineToHtml(buf, lineIdx) {
             const line = buf.getLine(lineIdx);
             if (!line) return { text: '', html: '' };
-            const text = line.translateToString(true);
-            if (!text.trim()) return { text, html: escText(text) };
+            const text = line.translateToString(true); // true = trim trailing whitespace
+            if (!text.trim()) return { text, html: '' };
             try {
                 let html = '';
                 let curStyle = '', spanOpen = false;
@@ -1543,7 +1542,11 @@
                     cell = line.getCell(x, cell);
                     if (!cell) break;
                     const ch = cell.getChars();
-                    if (!ch) continue;
+                    // Width 0 = second cell of wide char → skip
+                    if (ch === '') {
+                        const w = cell.getWidth ? cell.getWidth() : 1;
+                        if (w === 0) continue;
+                    }
                     let style = '';
                     try {
                         const fgMode = cell.getFgColorMode();
@@ -1598,12 +1601,15 @@
                         if (style) { html += '<span style="' + style + '">'; spanOpen = true; }
                         curStyle = style;
                     }
-                    if (ch === '<') html += '&lt;';
-                    else if (ch === '>') html += '&gt;';
-                    else if (ch === '&') html += '&amp;';
-                    else html += ch;
+                    const outCh = ch || ' ';
+                    if (outCh === '<') html += '&lt;';
+                    else if (outCh === '>') html += '&gt;';
+                    else if (outCh === '&') html += '&amp;';
+                    else html += outCh;
                 }
                 if (spanOpen) html += '</span>';
+                // Trim trailing plain spaces/spans from HTML
+                html = html.replace(/(<\/span>)?\s+$/, '$1');
                 return { text, html: html.length > 0 ? html : escText(text) };
             } catch(e) {
                 console.warn('bufferLineToHtml error:', e);
@@ -1644,15 +1650,20 @@
         // Read buffer lines from startLine..endLine-1 as rich HTML
         // Render entire terminal buffer as line-by-line chat view
         // Prompt lines get blue highlight, everything else is plain output
-        let lastRenderedLineCount = 0;
+        let lastRenderedHash = '';
 
         function renderChatView() {
             if (!currentTerm) return;
             const buf = currentTerm.buffer.active;
             const totalLines = buf.baseY + buf.cursorY + 1;
-            // Skip if nothing changed
-            if (totalLines === lastRenderedLineCount) return;
-            lastRenderedLineCount = totalLines;
+            // Quick change detection: check last few lines for content changes
+            let hash = totalLines + ':';
+            for (let i = Math.max(0, totalLines - 3); i < totalLines; i++) {
+                const l = buf.getLine(i);
+                if (l) hash += l.translateToString(true);
+            }
+            if (hash === lastRenderedHash) return;
+            lastRenderedHash = hash;
 
             const frag = document.createDocumentFragment();
 
