@@ -1524,9 +1524,10 @@
         let chatSnapshotTimer = null;
         let lastChatTimeStr = '';
         // Deferred output state
-        let waitingForOutput = false;   // waiting for command output to finish
-        let pendingOutputStart = 0;     // buffer line where pending output starts
-        let chatSentFromInput = false;  // skip echo prompt
+        let waitingForOutput = false;
+        let sentText = '';              // the text user sent (to find in buffer)
+        let sentTextFoundLine = -1;     // buffer line where sent text was found
+        let phase = 'idle';            // 'idle' | 'finding' | 'waiting'
 
         function openChat() {
             chatMode = true;
@@ -1539,7 +1540,7 @@
             chatLastLine = 0;
             lastChatTimeStr = '';
             waitingForOutput = false;
-            chatSentFromInput = false;
+            phase = 'idle';
             chatView.classList.add('active');
             // Load existing history as static bubbles
             snapshotBuffer();
@@ -1559,6 +1560,7 @@
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             hideTyping();
             waitingForOutput = false;
+            phase = 'idle';
             if (fitAddon) setTimeout(() => fitAddon.fit(), 50);
         }
 
@@ -1572,15 +1574,14 @@
         function chatSendInput() {
             const text = chatInputField.value;
             if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
-            // Stop the history snapshot timer (we handle output ourselves now)
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             addChatBubble('sent', text);
             showTyping();
-            // Mark state: waiting for output, record where output will start
-            const buf = currentTerm.buffer.active;
-            pendingOutputStart = buf.baseY + buf.cursorY + 1;
+            // Save sent text for buffer detection
+            sentText = text.trim();
+            sentTextFoundLine = -1;
+            phase = 'finding'; // Phase 1: find our text in the buffer
             waitingForOutput = true;
-            chatSentFromInput = true;
             lastContentHash = '';
             idleSince = 0;
             scrollChatToBottom();
@@ -1593,83 +1594,98 @@
             }, 50);
             chatInputField.value = '';
             chatAutoResize();
-            // Start polling for output completion
-            if (!chatSnapshotTimer) {
-                chatSnapshotTimer = setInterval(pollOutputComplete, 300);
-            }
+            // Start polling
+            chatSnapshotTimer = setInterval(pollOutputComplete, 300);
         }
 
-        // Poll: detect output completion by content change + idle timeout
+        // Two-phase output detection:
+        // Phase 1 (finding): search buffer for the sent text → confirms input was received
+        // Phase 2 (waiting): watch for content to stop changing → response is done
         let lastContentHash = '';
         let idleSince = 0;
-        const IDLE_THRESHOLD = 3000; // ms with no content change → consider done
-
-        function getVisibleContentHash(buf) {
-            // Hash the last few visible lines to detect ANY change (including overwrites)
-            const totalLines = buf.baseY + buf.cursorY + 1;
-            let h = totalLines + ':';
-            const start = Math.max(0, totalLines - 5);
-            for (let i = start; i < totalLines; i++) {
-                const line = buf.getLine(i);
-                if (line) h += line.translateToString(false);
-            }
-            return h;
-        }
+        const IDLE_THRESHOLD = 3000;
 
         function pollOutputComplete() {
             if (!currentTerm || !waitingForOutput) return;
             const buf = currentTerm.buffer.active;
             const totalLines = buf.baseY + buf.cursorY + 1;
 
-            // Check if visible content has changed
-            const currentHash = getVisibleContentHash(buf);
-            if (currentHash !== lastContentHash) {
-                // Content changed — reset idle timer
-                lastContentHash = currentHash;
-                idleSince = Date.now();
+            // === Phase 1: Find the sent text in the buffer ===
+            if (phase === 'finding') {
+                for (let i = totalLines - 1; i >= Math.max(0, totalLines - 50); i--) {
+                    const line = buf.getLine(i);
+                    if (!line) continue;
+                    const text = line.translateToString(true);
+                    if (text.includes(sentText)) {
+                        sentTextFoundLine = i;
+                        phase = 'waiting';
+                        lastContentHash = '';
+                        idleSince = 0;
+                        return;
+                    }
+                }
+                // Not found yet — keep looking (timeout after 15s)
+                if (!idleSince) idleSince = Date.now();
+                if (Date.now() - idleSince > 15000) {
+                    // Give up
+                    hideTyping();
+                    waitingForOutput = false;
+                    phase = 'idle';
+                    resumeHistoryPolling();
+                }
                 return;
             }
 
-            // Content unchanged — check if idle long enough
-            if (!idleSince) { idleSince = Date.now(); return; }
-            if (Date.now() - idleSince < IDLE_THRESHOLD) return;
+            // === Phase 2: Wait for content to stop changing ===
+            if (phase === 'waiting') {
+                // Hash the visible content to detect any change
+                let h = '';
+                const start = Math.max(buf.baseY, sentTextFoundLine);
+                for (let i = start; i < totalLines; i++) {
+                    const line = buf.getLine(i);
+                    if (line) h += line.translateToString(false) + '|';
+                }
 
-            // Idle timeout reached — output is done!
-            // For interactive TUIs (like Claude Code), the buffer may have been
-            // overwritten via cursor movement. Read the entire visible viewport.
-            const viewportStart = buf.baseY;  // first visible line
-            let outputFrom = viewportStart;
-            let outputTo = totalLines;
+                if (h !== lastContentHash) {
+                    lastContentHash = h;
+                    idleSince = Date.now();
+                    return;
+                }
 
-            // Trim leading blank lines
-            for (let i = outputFrom; i < outputTo; i++) {
-                const line = buf.getLine(i);
-                if (line && line.translateToString(true).trim()) break;
-                outputFrom = i + 1;
-            }
-            // Trim trailing blank lines
-            for (let i = outputTo - 1; i >= outputFrom; i--) {
-                const line = buf.getLine(i);
-                if (line && line.translateToString(true).trim()) break;
-                outputTo = i;
-            }
+                if (!idleSince) { idleSince = Date.now(); return; }
+                if (Date.now() - idleSince < IDLE_THRESHOLD) return;
 
-            const htmlParts = [];
-            for (let j = outputFrom; j < outputTo; j++) {
-                const { html } = bufferLineToHtml(buf, j);
-                htmlParts.push(html);
-            }
-            const outputHtml = htmlParts.join('\n').replace(/(\n\s*)+$/, '');
-            hideTyping();
-            if (outputHtml.trim()) {
-                addChatBubble('received', '', outputHtml);
-            }
-            scrollChatToBottom();
-            chatLastLine = totalLines;
-            waitingForOutput = false;
-            chatSentFromInput = false;
+                // Content stable for 3s — output is done!
+                // Capture from sentTextFoundLine+1 to end (everything after user's text)
+                let outputFrom = sentTextFoundLine + 1;
+                let outputTo = totalLines;
 
-            // Resume normal history polling
+                // Trim trailing blank lines
+                for (let i = outputTo - 1; i >= outputFrom; i--) {
+                    const line = buf.getLine(i);
+                    if (line && line.translateToString(true).trim()) break;
+                    outputTo = i;
+                }
+
+                const htmlParts = [];
+                for (let j = outputFrom; j < outputTo; j++) {
+                    const { html } = bufferLineToHtml(buf, j);
+                    htmlParts.push(html);
+                }
+                const outputHtml = htmlParts.join('\n').replace(/(\n\s*)+$/, '');
+                hideTyping();
+                if (outputHtml.trim()) {
+                    addChatBubble('received', '', outputHtml);
+                }
+                scrollChatToBottom();
+                chatLastLine = totalLines;
+                waitingForOutput = false;
+                phase = 'idle';
+                resumeHistoryPolling();
+            }
+        }
+
+        function resumeHistoryPolling() {
             if (chatSnapshotTimer) clearInterval(chatSnapshotTimer);
             chatSnapshotTimer = setInterval(() => {
                 if (!waitingForOutput) snapshotBuffer();
