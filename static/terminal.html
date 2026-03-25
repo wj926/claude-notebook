@@ -33,7 +33,6 @@
         .layout {
             display: flex;
             height: 100vh;
-            height: 100dvh;
         }
 
         /* Sidebar */
@@ -740,6 +739,10 @@
             }
             .term-input-bar {
                 padding-bottom: max(8px, env(safe-area-inset-bottom));
+                transform: translateY(calc(-1 * var(--keyboard-offset, 0px)));
+            }
+            .chat-input-bar {
+                transform: translateY(calc(-1 * var(--keyboard-offset, 0px)));
             }
         }
     </style>
@@ -1755,6 +1758,16 @@
 
         // Update scrollbar on scroll and content changes
         setInterval(updateScrollbar, 200);
+
+        // Mobile keyboard: keep input bar visible when virtual keyboard opens
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                const vv = window.visualViewport;
+                // Offset = difference between layout viewport and visual viewport
+                const offset = window.innerHeight - vv.height;
+                document.documentElement.style.setProperty('--keyboard-offset', offset + 'px');
+            });
+        }
 
         // Init
         loadTerminals();

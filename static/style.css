@@ -417,6 +417,20 @@ html, body {
     margin: 8px 0;
 }
 
+/* Image viewer */
+.image-viewer {
+    text-align: center;
+    padding: 12px 0;
+}
+
+.image-viewer img {
+    max-width: 100%;
+    max-height: 80vh;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
 /* Non-markdown file display */
 .file-raw {
     font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;

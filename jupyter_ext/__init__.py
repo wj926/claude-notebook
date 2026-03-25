@@ -205,6 +205,14 @@ class WorkspaceTreeHandler(IPythonHandler):
         self.finish(json.dumps(tree, ensure_ascii=False))
 
 
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'}
+IMAGE_CONTENT_TYPES = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon', '.bmp': 'image/bmp',
+}
+
+
 class WorkspaceFileHandler(IPythonHandler):
     @web.authenticated
     def get(self):
@@ -215,6 +223,16 @@ class WorkspaceFileHandler(IPythonHandler):
         full_path = (workspace / file_path).resolve()
         if not full_path.is_file():
             raise web.HTTPError(404, "File not found")
+        ext = full_path.suffix.lower()
+
+        # Serve images as binary
+        if ext in IMAGE_EXTENSIONS:
+            ct = IMAGE_CONTENT_TYPES.get(ext, 'application/octet-stream')
+            self.set_header("Content-Type", ct)
+            self.set_header("Cache-Control", "public, max-age=3600")
+            self.finish(full_path.read_bytes())
+            return
+
         try:
             content = full_path.read_text(encoding="utf-8")
             self.set_header("Content-Type", "application/json; charset=utf-8")
@@ -222,7 +240,7 @@ class WorkspaceFileHandler(IPythonHandler):
                 "path": file_path,
                 "name": full_path.name,
                 "content": content,
-                "extension": full_path.suffix.lower(),
+                "extension": ext,
             }, ensure_ascii=False))
         except Exception as e:
             raise web.HTTPError(500, str(e))

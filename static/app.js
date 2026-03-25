@@ -162,24 +162,39 @@
             json: '&#128203;', yaml: '&#128203;', yml: '&#128203;',
             html: '&#127760;', css: '&#127912;',
             txt: '&#128196;', sh: '&#9881;',
+            png: '&#128247;', jpg: '&#128247;', jpeg: '&#128247;',
+            gif: '&#128247;', webp: '&#128247;', svg: '&#128247;',
+            bmp: '&#128247;', ico: '&#128247;',
         };
         return icons[ext] || '&#128196;';
     }
 
     // === Load file ===
+    const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'];
+
     async function loadFile(path) {
         try {
             const base = window.__VIEWER_BASE || '';
+            const ext = '.' + path.split('.').pop().toLowerCase();
+            const parts = path.split('/');
+            const breadcrumb = parts.map((p, i) => `<span>${escHtml(p)}</span>`).join(' / ');
+
+            // Image files: display directly as <img>
+            if (IMAGE_EXTS.includes(ext)) {
+                const imgUrl = `${base}/api/file?path=${encodeURIComponent(path)}`;
+                contentEl.innerHTML = `
+                    <div class="breadcrumb">${breadcrumb}</div>
+                    <div class="image-viewer"><img src="${imgUrl}" alt="${escHtml(parts[parts.length - 1])}"></div>
+                `;
+                return;
+            }
+
             const res = await fetch(`${base}/api/file?path=${encodeURIComponent(path)}`, fetchOpts);
             if (!res.ok) {
                 const text = await res.text();
                 throw new Error(`HTTP ${res.status}: ${text.substring(0, 100)}`);
             }
             const data = await res.json();
-
-            // Breadcrumb
-            const parts = path.split('/');
-            const breadcrumb = parts.map((p, i) => `<span>${escHtml(p)}</span>`).join(' / ');
 
             const isMarkdown = ['.md', '.markdown'].includes(data.extension);
 
@@ -189,7 +204,6 @@
                     <div class="breadcrumb">${breadcrumb}</div>
                     <div class="markdown-body">${html}</div>
                 `;
-                // Apply syntax highlighting to code blocks
                 if (typeof hljs !== 'undefined') {
                     contentEl.querySelectorAll('pre code').forEach((block) => {
                         hljs.highlightElement(block);
