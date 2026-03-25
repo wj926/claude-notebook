@@ -8,29 +8,25 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --bg: #f2f2f7;
-            --sidebar-bg: #ffffff;
-            --sidebar-hover: #f2f2f7;
-            --sidebar-active: #007aff;
-            --text: #1c1c1e;
-            --text-secondary: #8e8e93;
-            --border: #c6c6c8;
-            --border-light: #e5e5ea;
-            --accent: #007aff;
-            --danger: #ff3b30;
-            --danger-hover: #d62d23;
-            --success: #34c759;
-            --toolbar-bg: rgba(249,249,249,0.94);
-            --input-bg: #ffffff;
+            --bg: #ffffff;
+            --sidebar-bg: #f7f6f3;
+            --sidebar-hover: #eeece8;
+            --sidebar-active: #e8e5e0;
+            --text: #37352f;
+            --text-secondary: #9b9a97;
+            --border: #e8e5e0;
+            --accent: #2eaadc;
+            --danger: #e03e3e;
+            --danger-hover: #c53030;
+            --success: #0f7b6c;
         }
         html, body {
             height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
             font-size: 16px;
             color: var(--text);
             background: var(--bg);
             overflow: hidden;
-            -webkit-font-smoothing: antialiased;
         }
 
         /* Layout */
@@ -40,93 +36,80 @@
             height: 100dvh;
         }
 
-        /* ===== Sidebar (iMessage conversation list) ===== */
+        /* Sidebar */
         .term-sidebar {
-            width: 320px;
-            min-width: 280px;
+            width: 240px;
+            min-width: 200px;
             background: var(--sidebar-bg);
-            border-right: 1px solid var(--border-light);
+            border-right: 1px solid var(--border);
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
         .term-sidebar-header {
-            padding: 12px 16px;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: var(--toolbar-bg);
-            backdrop-filter: saturate(180%) blur(20px);
-            -webkit-backdrop-filter: saturate(180%) blur(20px);
-            border-bottom: 0.5px solid var(--border-light);
         }
         .term-sidebar-header h2 {
-            font-size: 17px;
-            font-weight: 700;
-            text-transform: none;
-            letter-spacing: -0.4px;
-            color: var(--text);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
         }
         .header-actions {
             display: flex;
-            gap: 12px;
+            gap: 6px;
             align-items: center;
         }
         .btn-icon {
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 30px;
-            height: 30px;
+            width: 28px;
+            height: 28px;
             background: none;
-            border: none;
-            border-radius: 50%;
-            color: var(--accent);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
             cursor: pointer;
             transition: all 0.15s;
             font-size: 16px;
         }
         .btn-icon:hover {
-            background: var(--sidebar-hover);
-        }
-        .btn-icon:active {
-            background: var(--border-light);
+            background: var(--text);
+            color: #fff;
+            border-color: var(--text);
         }
         .btn-icon.back-btn {
             font-size: 14px;
         }
         .btn-icon.new-btn {
-            font-size: 22px;
-            font-weight: 400;
-            background: var(--accent);
-            color: #fff;
-            width: 28px;
-            height: 28px;
-        }
-        .btn-icon.new-btn:hover {
-            background: #0062cc;
+            font-size: 18px;
+            font-weight: 300;
         }
 
-        /* Terminal list (conversation list) */
+        /* Terminal list */
         .term-list {
             flex: 1;
             overflow-y: auto;
-            padding: 0;
+            padding: 8px 0;
             scrollbar-width: thin;
-            scrollbar-color: var(--border-light) transparent;
+            scrollbar-color: var(--border) transparent;
         }
         .term-item {
             display: flex;
             align-items: center;
-            padding: 12px 16px;
-            margin: 0;
+            padding: 8px 12px;
+            margin: 2px 8px;
             cursor: pointer;
-            font-size: 15px;
-            border-radius: 0;
-            transition: background 0.15s;
-            gap: 12px;
-            border-bottom: 0.5px solid var(--border-light);
-            position: relative;
+            font-size: 14px;
+            border-radius: 6px;
+            transition: background 0.1s;
+            gap: 8px;
         }
         .term-item:hover {
             background: var(--sidebar-hover);
@@ -135,127 +118,94 @@
             background: var(--sidebar-active);
             font-weight: 500;
         }
-        .term-item.active .term-item-name {
-            color: #fff;
-        }
-        .term-item.active .term-item-time {
-            color: rgba(255,255,255,0.7);
-        }
-        .term-item.active .term-item-icon {
-            background: rgba(255,255,255,0.25);
-            color: #fff;
-        }
-        .term-item.active .term-item-close {
-            color: rgba(255,255,255,0.7);
-        }
         .term-item-icon {
             flex-shrink: 0;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: #e5e5ea;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            width: 20px;
+            text-align: center;
             color: var(--text-secondary);
-        }
-        .term-item-icon svg {
-            width: 18px;
-            height: 18px;
         }
         .term-item-name {
             flex: 1;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
-            font-weight: 500;
-            letter-spacing: -0.2px;
         }
         .term-item-name[contenteditable="true"] {
             outline: none;
             background: #fff;
-            border: 2px solid var(--accent);
-            border-radius: 8px;
-            padding: 2px 8px;
-            margin: -2px -8px;
+            border: 1px solid var(--accent);
+            border-radius: 3px;
+            padding: 1px 4px;
+            margin: -1px -4px;
             min-width: 40px;
         }
         .term-item-time {
-            font-size: 13px;
+            font-size: 11px;
             color: var(--text-secondary);
             flex-shrink: 0;
-            position: absolute;
-            top: 12px;
-            right: 40px;
         }
         .term-item-close {
             flex-shrink: 0;
-            width: 24px;
-            height: 24px;
+            width: 22px;
+            height: 22px;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: none;
+            border: 1px solid transparent;
             background: none;
             color: var(--text-secondary);
             cursor: pointer;
-            border-radius: 50%;
-            font-size: 15px;
-            opacity: 0;
-            transition: all 0.15s;
-        }
-        .term-item:hover .term-item-close {
-            opacity: 1;
+            border-radius: 4px;
+            font-size: 13px;
+            opacity: 0.6;
+            transition: all 0.1s;
         }
         .term-item-close:hover {
+            opacity: 1;
             background: var(--danger);
             color: #fff;
+            border-color: var(--danger);
         }
         .term-empty {
-            padding: 40px 24px;
+            padding: 24px 16px;
             text-align: center;
             color: var(--text-secondary);
-            font-size: 15px;
+            font-size: 13px;
             line-height: 1.6;
         }
 
-        /* ===== Main terminal area ===== */
+        /* Main terminal area */
         .term-main {
             flex: 1;
             display: flex;
             flex-direction: column;
-            background: var(--bg);
+            background: #1e1e1e;
             position: relative;
             min-width: 0;
             min-height: 0;
         }
-
-        /* Toolbar (iOS navigation bar) */
         .term-toolbar {
             display: flex;
             align-items: center;
-            padding: 8px 16px;
-            background: var(--toolbar-bg);
-            backdrop-filter: saturate(180%) blur(20px);
-            -webkit-backdrop-filter: saturate(180%) blur(20px);
-            border-bottom: 0.5px solid var(--border-light);
-            gap: 10px;
-            min-height: 44px;
+            padding: 6px 12px;
+            background: #2d2d2d;
+            border-bottom: 1px solid #404040;
+            gap: 8px;
+            min-height: 36px;
             flex-shrink: 0;
         }
         .term-toolbar-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--text);
-            letter-spacing: -0.3px;
+            font-size: 12px;
+            color: #ccc;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             min-width: 0;
         }
         .term-toolbar-dot {
-            width: 10px;
-            height: 10px;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
             background: var(--success);
             flex-shrink: 0;
@@ -266,22 +216,19 @@
         .term-toolbar-spacer { flex: 1; }
         .term-toolbar-btn {
             background: none;
-            border: none;
-            color: var(--accent);
-            font-size: 13px;
-            font-weight: 500;
-            padding: 6px 10px;
-            border-radius: 8px;
+            border: 1px solid #555;
+            color: #ccc;
+            font-size: 11px;
+            padding: 3px 10px;
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s;
             flex-shrink: 0;
             white-space: nowrap;
         }
         .term-toolbar-btn:hover {
-            background: rgba(0,122,255,0.1);
-        }
-        .term-toolbar-btn:active {
-            background: rgba(0,122,255,0.2);
+            background: #555;
+            color: #fff;
         }
 
         /* Terminal + scrollbar wrapper */
@@ -290,16 +237,11 @@
             min-height: 0;
             position: relative;
             display: flex;
-            margin: 8px;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 0 0 0.5px rgba(0,0,0,0.05);
         }
         #terminalContainer {
             flex: 1;
             overflow: hidden;
             min-width: 0;
-            background: #1c1c1e;
         }
         #terminalContainer .xterm {
             height: 100%;
@@ -317,11 +259,12 @@
             touch-action: pan-y;
         }
 
-        /* Custom scrollbar */
+        /* Custom scrollbar — fixed-width column next to terminal */
         .custom-scrollbar {
-            width: 12px;
+            width: 14px;
             flex-shrink: 0;
-            background: #2c2c2e;
+            background: #252525;
+            border-left: 1px solid #404040;
             position: relative;
             display: none;
         }
@@ -334,50 +277,48 @@
             bottom: 4px;
             left: 2px;
             right: 2px;
-            background: transparent;
+            background: #333;
             border-radius: 5px;
         }
         .custom-scrollbar-thumb {
             position: absolute;
-            left: 3px;
-            right: 3px;
+            left: 2px;
+            right: 2px;
             min-height: 40px;
-            background: rgba(255,255,255,0.25);
-            border-radius: 3px;
+            background: #888;
+            border-radius: 5px;
             cursor: pointer;
             touch-action: none;
             transition: background 0.1s;
         }
         .custom-scrollbar-thumb:hover,
         .custom-scrollbar-thumb.dragging {
-            background: rgba(255,255,255,0.45);
+            background: #bbb;
         }
 
-        /* ===== Input bar (iOS message input) ===== */
+        /* Input bar */
         .term-input-bar {
             display: flex;
             align-items: flex-end;
-            padding: 8px 12px;
-            background: var(--toolbar-bg);
-            backdrop-filter: saturate(180%) blur(20px);
-            -webkit-backdrop-filter: saturate(180%) blur(20px);
-            border-top: 0.5px solid var(--border-light);
-            gap: 8px;
+            padding: 8px 10px;
+            background: #2d2d2d;
+            border-top: 1px solid #404040;
+            gap: 6px;
             flex-shrink: 0;
-            min-height: 52px;
+            min-height: 44px;
         }
         .term-input-bar.hidden {
             display: none !important;
         }
         .term-input-field {
             flex: 1;
-            background: var(--input-bg);
-            border: 1px solid var(--border-light);
-            border-radius: 20px;
-            color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
-            font-size: 15px;
-            padding: 8px 16px;
+            background: #1e1e1e;
+            border: 1px solid #555;
+            border-radius: 6px;
+            color: #d4d4d4;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+            font-size: 14px;
+            padding: 8px 12px;
             outline: none;
             resize: none;
             max-height: 120px;
@@ -386,51 +327,44 @@
         }
         .term-input-field:focus {
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
         }
         .term-input-send {
             background: var(--accent);
             border: none;
-            border-radius: 50%;
+            border-radius: 6px;
             color: #fff;
-            font-size: 16px;
-            font-weight: 600;
-            width: 34px;
-            height: 34px;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 14px;
             cursor: pointer;
             white-space: nowrap;
-            transition: all 0.15s;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
+            transition: background 0.15s;
+            align-self: flex-end;
         }
         .term-input-send:hover {
-            background: #0062cc;
+            background: #258fb5;
         }
         .term-input-send:active {
-            transform: scale(0.92);
+            background: #1d7a9e;
         }
         .term-placeholder {
             flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            flex-direction: column;
-            color: var(--text-secondary);
-            font-size: 15px;
+            color: #666;
+            font-size: 14px;
             text-align: center;
             padding: 20px;
             line-height: 1.6;
-            gap: 12px;
         }
 
-        /* ===== Config modal (iOS action sheet style) ===== */
+        /* Config modal */
         .config-modal-overlay {
             display: none;
             position: fixed;
             top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.4);
+            background: rgba(0,0,0,0.5);
             z-index: 2000;
             align-items: center;
             justify-content: center;
@@ -440,19 +374,17 @@
         }
         .config-modal {
             background: #fff;
-            border-radius: 14px;
+            border-radius: 12px;
             padding: 24px;
             width: 90%;
-            max-width: 380px;
-            box-shadow: 0 16px 40px rgba(0,0,0,0.2);
+            max-width: 420px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
         }
         .config-modal h3 {
-            font-size: 17px;
+            font-size: 16px;
             font-weight: 600;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             color: var(--text);
-            text-align: center;
-            letter-spacing: -0.3px;
         }
         .config-modal label {
             display: block;
@@ -460,30 +392,25 @@
             font-weight: 500;
             color: var(--text-secondary);
             margin-bottom: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
         }
         .config-modal input,
         .config-modal textarea {
             width: 100%;
-            border: 1px solid var(--border-light);
-            border-radius: 10px;
-            padding: 12px 14px;
-            font-size: 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
             font-family: inherit;
             outline: none;
-            transition: all 0.15s;
+            transition: border-color 0.15s;
             box-sizing: border-box;
-            background: var(--bg);
         }
         .config-modal input:focus,
         .config-modal textarea:focus {
             border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(0,122,255,0.15);
-            background: #fff;
         }
         .config-modal textarea {
-            font-family: 'SF Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
             font-size: 13px;
             resize: vertical;
             min-height: 60px;
@@ -494,31 +421,31 @@
             margin-bottom: 16px;
         }
         .config-modal .field-hint {
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-secondary);
-            margin-top: 6px;
+            margin-top: 4px;
         }
         .config-modal-actions {
             display: flex;
             gap: 8px;
-            margin-top: 24px;
+            justify-content: flex-end;
+            margin-top: 20px;
         }
         .config-modal-actions button {
-            flex: 1;
-            padding: 12px 20px;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 600;
+            padding: 8px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
             cursor: pointer;
             transition: all 0.15s;
         }
         .modal-btn-cancel {
-            background: var(--bg);
-            border: none;
-            color: var(--accent);
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text);
         }
         .modal-btn-cancel:hover {
-            background: var(--border-light);
+            background: var(--sidebar-hover);
         }
         .modal-btn-confirm {
             background: var(--accent);
@@ -526,13 +453,10 @@
             color: #fff;
         }
         .modal-btn-confirm:hover {
-            background: #0062cc;
-        }
-        .modal-btn-confirm:active {
-            transform: scale(0.97);
+            background: #258fb5;
         }
 
-        /* ===== iMessage chat view ===== */
+        /* iMessage chat view */
         .chat-view {
             display: none;
             flex: 1;
@@ -549,46 +473,47 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
-            background: var(--bg);
+            background: #1e1e1e;
             -webkit-overflow-scrolling: touch;
         }
         .chat-bubble {
-            max-width: 80%;
-            padding: 10px 16px;
-            border-radius: 20px;
-            font-family: 'SF Mono', 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+            max-width: 85%;
+            padding: 8px 14px;
+            border-radius: 18px;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
             font-size: 13px;
             line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-word;
+            overflow-x: auto;
         }
         .chat-bubble.stdin {
             align-self: flex-end;
-            background: var(--accent);
+            background: #007aff;
             color: #fff;
-            border-bottom-right-radius: 6px;
+            border-bottom-right-radius: 4px;
         }
         .chat-bubble.stdout {
             align-self: flex-start;
-            background: #e5e5ea;
-            color: var(--text);
-            border-bottom-left-radius: 6px;
+            background: #3a3a3c;
+            color: #d4d4d4;
+            border-bottom-left-radius: 4px;
         }
         .chat-bubble .chat-time {
             font-size: 10px;
-            opacity: 0.6;
+            opacity: 0.5;
             margin-top: 4px;
             display: block;
             font-family: -apple-system, BlinkMacSystemFont, sans-serif;
         }
         .chat-toggle-btn {
             background: none;
-            border: none;
-            color: var(--accent);
-            font-size: 16px;
-            width: 34px;
-            height: 34px;
-            border-radius: 8px;
+            border: 1px solid #555;
+            color: #ccc;
+            font-size: 14px;
+            width: 28px;
+            height: 24px;
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.15s;
             display: flex;
@@ -597,29 +522,28 @@
             flex-shrink: 0;
         }
         .chat-toggle-btn:hover {
-            background: rgba(0,122,255,0.1);
+            background: #555;
+            color: #fff;
         }
         .chat-toggle-btn.active {
             background: var(--accent);
+            border-color: var(--accent);
             color: #fff;
-            border-radius: 50%;
         }
 
-        /* ===== Mobile ===== */
+        /* Mobile sidebar toggle */
         .mobile-toggle {
             display: none;
             position: fixed;
-            top: 8px;
-            left: 8px;
+            top: 6px;
+            left: 6px;
             z-index: 1001;
             width: 36px;
             height: 36px;
-            background: var(--toolbar-bg);
-            backdrop-filter: saturate(180%) blur(20px);
-            -webkit-backdrop-filter: saturate(180%) blur(20px);
-            border: 0.5px solid var(--border-light);
-            border-radius: 10px;
-            color: var(--accent);
+            background: rgba(45,45,45,0.9);
+            border: 1px solid #555;
+            border-radius: 8px;
+            color: #ccc;
             font-size: 18px;
             cursor: pointer;
             align-items: center;
@@ -629,6 +553,7 @@
             display: none;
         }
 
+        /* Mobile */
         @media (max-width: 768px) {
             .mobile-toggle {
                 display: flex;
@@ -637,35 +562,30 @@
                 position: fixed;
                 top: 0; left: 0; bottom: 0;
                 z-index: 1000;
-                width: 320px;
-                max-width: 85vw;
+                width: 280px;
                 transform: translateX(-100%);
-                transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                transition: transform 0.25s ease;
                 box-shadow: none;
             }
             .term-sidebar.open {
                 transform: translateX(0);
-                box-shadow: 8px 0 24px rgba(0,0,0,0.12);
+                box-shadow: 4px 0 16px rgba(0,0,0,0.15);
             }
             .mobile-overlay.active {
                 display: block;
                 position: fixed;
                 top: 0; left: 0; right: 0; bottom: 0;
                 z-index: 999;
-                background: rgba(0,0,0,0.3);
+                background: rgba(0,0,0,0.4);
             }
             .term-sidebar-header {
-                padding-left: 16px;
+                padding-left: 52px;
             }
             .term-toolbar {
-                padding-left: 52px;
+                padding-left: 48px;
             }
             .term-input-bar {
                 padding-bottom: max(8px, env(safe-area-inset-bottom));
-            }
-            .term-body {
-                margin: 4px;
-                border-radius: 10px;
             }
         }
     </style>
@@ -697,7 +617,7 @@
 
         <aside class="term-sidebar" id="termSidebar">
             <div class="term-sidebar-header">
-                <h2>Terminal</h2>
+                <h2>Terminals</h2>
                 <div class="header-actions">
                     <button class="btn-icon new-btn" id="newTermBtn" title="New Terminal">+</button>
                     <button class="btn-icon back-btn" id="backBtn" title="Back to Workspace Viewer">
@@ -721,7 +641,7 @@
                 <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle chat view">💬</button>
                 <button class="term-toolbar-btn" id="renameBtn">Rename</button>
                 <button class="term-toolbar-btn" id="reconnectBtn">Reconnect</button>
-                <button class="term-toolbar-btn" id="shutdownBtn" style="color:var(--danger);">Shutdown</button>
+                <button class="term-toolbar-btn" id="shutdownBtn" style="border-color:#e03e3e;color:#e03e3e;">Shutdown</button>
             </div>
             <div class="term-body">
                 <div id="terminalContainer" style="display:none;"></div>
@@ -735,7 +655,7 @@
             </div>
             <div class="term-input-bar hidden" id="termInputBar">
                 <textarea class="term-input-field" id="termInputField" placeholder="Type command..." rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-                <button class="term-input-send" id="termInputSend" title="Send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
+                <button class="term-input-send" id="termInputSend">Send</button>
             </div>
         </div>
     </div>
@@ -1160,18 +1080,18 @@
                 fontSize: 14,
                 fontFamily: "'SFMono-Regular', 'Fira Code', 'Consolas', 'Courier New', monospace",
                 theme: {
-                    background: '#1c1c1e',
-                    foreground: '#e5e5ea',
-                    cursor: '#e5e5ea',
-                    selectionBackground: '#0a4f8a',
-                    black: '#1c1c1e',
-                    red: '#ff453a',
-                    green: '#30d158',
-                    yellow: '#ffd60a',
-                    blue: '#0a84ff',
-                    magenta: '#bf5af2',
-                    cyan: '#64d2ff',
-                    white: '#e5e5ea',
+                    background: '#1e1e1e',
+                    foreground: '#d4d4d4',
+                    cursor: '#d4d4d4',
+                    selectionBackground: '#264f78',
+                    black: '#1e1e1e',
+                    red: '#f44747',
+                    green: '#6a9955',
+                    yellow: '#d7ba7d',
+                    blue: '#569cd6',
+                    magenta: '#c586c0',
+                    cyan: '#4ec9b0',
+                    white: '#d4d4d4',
                 },
                 scrollback: 10000,
                 smoothScrollDuration: 0,
@@ -1443,7 +1363,68 @@
             });
         }
 
-        // Batch stdout for chat: collect output for 300ms before creating a bubble
+        // === Terminal output → chat text conversion ===
+        // Strips ANSI escape codes and emulates carriage return line overwriting
+        function cleanTerminalOutput(raw) {
+            // 1. Strip all ANSI escape sequences
+            let text = raw
+                // CSI sequences: ESC [ ... <letter>  (colors, cursor moves, erase, etc.)
+                .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '')
+                // OSC sequences: ESC ] ... BEL or ESC ] ... ST
+                .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+                // ESC ( / ESC ) charset selects
+                .replace(/\x1b[()][0-9A-B]/g, '')
+                // Other 2-byte ESC sequences (ESC =, ESC >, etc.)
+                .replace(/\x1b[^[\]()]/g, '')
+                // Stray ESC
+                .replace(/\x1b/g, '')
+                // BEL
+                .replace(/\x07/g, '')
+                // Backspace character
+                .replace(/\x08/g, '');
+
+            // 2. Emulate carriage return (\r) — overwrites from start of line
+            //    Split by \n first, then handle \r within each line
+            const lines = text.split('\n');
+            const processed = [];
+            for (let line of lines) {
+                if (line.includes('\r')) {
+                    // Each \r resets write position to start of line
+                    const parts = line.split('\r');
+                    let result = '';
+                    for (const part of parts) {
+                        if (part === '') continue;
+                        // Overwrite: part overwrites from position 0
+                        const chars = result.split('');
+                        for (let i = 0; i < part.length; i++) {
+                            chars[i] = part[i];
+                        }
+                        result = chars.join('');
+                    }
+                    processed.push(result);
+                } else {
+                    processed.push(line);
+                }
+            }
+
+            // 3. Collapse runs of 3+ empty lines into 2
+            let result = '';
+            let emptyCount = 0;
+            for (const line of processed) {
+                if (line.trim() === '') {
+                    emptyCount++;
+                    if (emptyCount <= 2) result += '\n';
+                } else {
+                    emptyCount = 0;
+                    if (result.length > 0 && !result.endsWith('\n')) result += '\n';
+                    result += line;
+                }
+            }
+
+            return result.trim();
+        }
+
+        // Batch stdout for chat: collect output for 500ms before creating a bubble
         let stdoutBuffer = '';
         let stdoutTimer = null;
         function bufferStdout(data) {
@@ -1451,13 +1432,12 @@
             if (stdoutTimer) clearTimeout(stdoutTimer);
             stdoutTimer = setTimeout(() => {
                 if (stdoutBuffer.trim()) {
-                    // Strip ANSI escape codes for chat view
-                    const clean = stdoutBuffer.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, '');
-                    addChatBubble('stdout', clean.trim());
+                    const clean = cleanTerminalOutput(stdoutBuffer);
+                    if (clean) addChatBubble('stdout', clean);
                 }
                 stdoutBuffer = '';
                 stdoutTimer = null;
-            }, 300);
+            }, 500);
         }
 
         // === Custom scrollbar ===
