@@ -603,16 +603,30 @@
             letter-spacing: 0.01em;
         }
         /* Live xterm bubble — dark terminal inside gray frame */
+        .chat-msg-row.received.live-term-row {
+            width: 100%;
+        }
         .chat-msg-row.received .chat-bubble.live-term {
-            padding: 0;
+            width: 100%;
+            min-width: 0;
+            padding: 6px;
             background: #1e1e1e;
             border-color: #333;
+            border-radius: 12px;
             overflow: hidden;
             white-space: normal;
             font-family: inherit;
+            font-size: inherit;
+            line-height: normal;
+        }
+        .chat-msg-row.received .chat-bubble.live-term .xterm {
+            height: 100%;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm-viewport {
             overflow-y: auto !important;
+        }
+        .chat-msg-row.received .chat-bubble.live-term .xterm-screen {
+            width: 100% !important;
         }
         .chat-msg-row.received .chat-bubble span[style*="text-decoration"] {
             text-underline-offset: 2px;
@@ -1404,9 +1418,6 @@
                         // Dual-write to live xterm in chat bubble
                         if (liveActive && liveTerm) {
                             liveTerm.write(msg[1]);
-                            // Auto-fit periodically
-                            if (liveFit) try { liveFit.fit(); } catch(e) {}
-                            scrollChatToBottom();
                         }
                     } else if (msg[0] === 'disconnect') {
                         statusDot.classList.add('disconnected');
@@ -1558,6 +1569,7 @@
         let liveFit = null;         // FitAddon for live term
         let liveBubble = null;      // bubble DOM element containing live term
         let liveActive = false;     // whether live term is currently active
+        let liveScrollTimer = null; // periodic scroll for live term
 
         function openChat() {
             chatMode = true;
@@ -1589,6 +1601,7 @@
 
         function destroyLiveTerm() {
             if (liveTerm) { try { liveTerm.dispose(); } catch(e) {} }
+            if (liveScrollTimer) { clearInterval(liveScrollTimer); liveScrollTimer = null; }
             liveTerm = null;
             liveFit = null;
             liveBubble = null;
@@ -1628,48 +1641,60 @@
             destroyLiveTerm();
             // Create bubble
             const row = document.createElement('div');
-            row.className = 'chat-msg-row received';
+            row.className = 'chat-msg-row received live-term-row';
             const bubble = document.createElement('div');
             bubble.className = 'chat-bubble live-term';
-            // Container for xterm
-            const container = document.createElement('div');
-            container.style.cssText = 'width:100%;min-height:60px;';
-            bubble.appendChild(container);
             row.appendChild(bubble);
             chatMessages.appendChild(row);
-            // Create xterm instance (same dark theme as main terminal)
-            liveTerm = new Terminal({
-                cursorBlink: false,
-                fontSize: 13,
-                fontFamily: "'SFMono-Regular', 'Fira Code', 'Consolas', 'Courier New', monospace",
-                theme: {
-                    background: '#1e1e1e',
-                    foreground: '#d4d4d4',
-                    cursor: '#d4d4d4',
-                    selectionBackground: '#264f78',
-                    black: '#1e1e1e',
-                    red: '#f44747',
-                    green: '#6a9955',
-                    yellow: '#d7ba7d',
-                    blue: '#569cd6',
-                    magenta: '#c586c0',
-                    cyan: '#4ec9b0',
-                    white: '#d4d4d4',
-                },
-                scrollback: 5000,
-                disableStdin: true,
-                allowProposedApi: true,
+
+            // Wait for layout to settle, then measure and create xterm
+            requestAnimationFrame(() => {
+                const bubbleWidth = bubble.clientWidth;
+                if (bubbleWidth < 50) return; // safety check
+
+                // Create xterm instance (same dark theme as main terminal)
+                liveTerm = new Terminal({
+                    cursorBlink: false,
+                    fontSize: 13,
+                    fontFamily: "'SFMono-Regular', 'Fira Code', 'Consolas', 'Courier New', monospace",
+                    theme: {
+                        background: '#1e1e1e',
+                        foreground: '#d4d4d4',
+                        cursor: '#d4d4d4',
+                        selectionBackground: '#264f78',
+                        black: '#1e1e1e',
+                        red: '#f44747',
+                        green: '#6a9955',
+                        yellow: '#d7ba7d',
+                        blue: '#569cd6',
+                        magenta: '#c586c0',
+                        cyan: '#4ec9b0',
+                        white: '#d4d4d4',
+                    },
+                    scrollback: 5000,
+                    disableStdin: true,
+                    allowProposedApi: true,
+                    cols: Math.floor((bubbleWidth - 12) / 7.8), // approximate char width
+                    rows: 10,
+                });
+                liveFit = new FitAddon.FitAddon();
+                liveTerm.loadAddon(liveFit);
+                liveTerm.open(bubble);
+                liveBubble = bubble;
+                liveActive = true;
+
+                // Fit to actual bubble width
+                setTimeout(() => {
+                    if (liveFit) try { liveFit.fit(); } catch(e) {}
+                    scrollChatToBottom();
+                }, 30);
+
+                // Periodic scroll to keep chat at bottom while output streams
+                if (liveScrollTimer) clearInterval(liveScrollTimer);
+                liveScrollTimer = setInterval(() => {
+                    if (liveActive) scrollChatToBottom();
+                }, 300);
             });
-            liveFit = new FitAddon.FitAddon();
-            liveTerm.loadAddon(liveFit);
-            liveTerm.open(container);
-            liveBubble = bubble;
-            liveActive = true;
-            // Fit after layout settles
-            setTimeout(() => {
-                if (liveFit) try { liveFit.fit(); } catch(e) {}
-                scrollChatToBottom();
-            }, 50);
         }
         function chatAutoResize() {
             chatInputField.style.height = 'auto';
