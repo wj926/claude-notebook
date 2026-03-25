@@ -271,13 +271,16 @@
     finderUpload.addEventListener('change', async () => {
         const files = finderUpload.files;
         if (!files.length) return;
-        await uploadFiles(files, currentFinderPath);
+        const wrapped = Array.from(files).map((f) => ({ file: f, relativePath: f.name }));
+        await uploadFiles(wrapped, currentFinderPath);
         finderUpload.value = '';
     });
 
-    async function uploadFiles(files, targetDir) {
+    async function uploadFiles(filesWithPaths, targetDir) {
         const form = new FormData();
-        for (const f of files) form.append('file', f, f.name);
+        for (const { file, relativePath } of filesWithPaths) {
+            form.append('file', file, relativePath || file.name);
+        }
         try {
             const url = `${BASE}/api/upload?dir=${encodeURIComponent(targetDir || '')}`;
             const res = await fetch(url, mutFetchOpts({ method: 'POST', body: form }));
@@ -287,6 +290,53 @@
         } catch (err) {
             alert('Upload failed: ' + err.message);
         }
+    }
+
+    // Recursively collect files from a DataTransferItem entry
+    function readEntryRecursive(entry) {
+        return new Promise((resolve) => {
+            if (entry.isFile) {
+                entry.file((f) => resolve([{ file: f, relativePath: entry.fullPath.replace(/^\//, '') }]));
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                const allEntries = [];
+                const readBatch = () => {
+                    reader.readEntries(async (entries) => {
+                        if (entries.length === 0) {
+                            const results = [];
+                            for (const e of allEntries) {
+                                results.push(...await readEntryRecursive(e));
+                            }
+                            resolve(results);
+                        } else {
+                            allEntries.push(...entries);
+                            readBatch(); // readEntries may return partial results
+                        }
+                    });
+                };
+                readBatch();
+            } else {
+                resolve([]);
+            }
+        });
+    }
+
+    async function collectDroppedFiles(dataTransfer) {
+        const items = dataTransfer.items;
+        if (items && items.length && items[0].webkitGetAsEntry) {
+            const allFiles = [];
+            for (let i = 0; i < items.length; i++) {
+                const entry = items[i].webkitGetAsEntry();
+                if (entry) allFiles.push(...await readEntryRecursive(entry));
+            }
+            return allFiles;
+        }
+        // Fallback: plain files (no folder support)
+        const result = [];
+        for (const f of dataTransfer.files) {
+            result.push({ file: f, relativePath: f.name });
+        }
+        return result;
     }
 
     // === Prevent browser from opening dropped files ===
@@ -303,8 +353,9 @@
         e.preventDefault();
         e.stopPropagation();
         finder.classList.remove('dragover');
-        if (e.dataTransfer.files.length) {
-            await uploadFiles(e.dataTransfer.files, currentFinderPath);
+        const files = await collectDroppedFiles(e.dataTransfer);
+        if (files.length) {
+            await uploadFiles(files, currentFinderPath);
         }
     });
 

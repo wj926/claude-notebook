@@ -303,10 +303,20 @@ class WorkspaceUploadHandler(IPythonHandler):
         uploaded = []
         for field_name, file_list in self.request.files.items():
             for f in file_list:
-                fname = Path(f["filename"]).name  # sanitize
-                if not fname:
+                raw_name = f["filename"]
+                # Support relative paths for folder uploads (e.g. "photos/a.png")
+                rel = Path(raw_name)
+                # Reject absolute or path-traversal attempts
+                if rel.is_absolute() or ".." in rel.parts:
                     continue
-                fpath = unique_filepath(dest, fname)
+                fname = str(rel)
+                if not fname or not rel.name:
+                    continue
+                file_dest = dest / rel.parent
+                if not str(file_dest.resolve()).startswith(str(workspace.resolve())):
+                    continue  # safety check
+                file_dest.mkdir(parents=True, exist_ok=True)
+                fpath = unique_filepath(file_dest, rel.name)
                 fpath.write_bytes(f["body"])
                 uploaded.append(str(fpath.relative_to(workspace)))
         self.set_header("Content-Type", "application/json; charset=utf-8")
