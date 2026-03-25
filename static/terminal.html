@@ -1558,15 +1558,12 @@
             }
         });
 
-        // Detect user input: line must START with ❯ (possibly after whitespace).
-        // Returns the command text after ❯, or null.
-        function extractCommand(line) {
-            const m = line.match(/^\s*❯\s?(.*)/);
-            if (m) return m[1] || null;
-            return null;
-        }
-
         // Snapshot xterm buffer → parse into sent/received bubbles
+        // Strategy:
+        //   ❯ line → start "sent" block (text after ❯)
+        //   Subsequent non-blank lines → continue "sent" (multi-line input)
+        //   Blank line → end "sent", switch to "received"
+        //   All lines stay "received" until next ❯
         function snapshotBuffer() {
             if (!currentTerm) return;
             const buf = currentTerm.buffer.active;
@@ -1581,10 +1578,16 @@
             chatLastLine = totalLines;
             if (newLines.length === 0) return;
 
-            // Split into blocks: prompt lines → sent, all others → received
             const blocks = [];
+            let mode = 'received';  // 'sent' or 'received'
+            let sentLines = [];
             let receivedLines = [];
 
+            function flushSent() {
+                const text = sentLines.join('\n').replace(/\s+$/, '');
+                if (text) blocks.push({ type: 'sent', text });
+                sentLines = [];
+            }
             function flushReceived() {
                 const text = receivedLines.join('\n').replace(/\s+$/, '');
                 if (text) blocks.push({ type: 'received', text });
@@ -1592,15 +1595,35 @@
             }
 
             for (const line of newLines) {
-                const cmd = extractCommand(line);
-                if (cmd !== null) {
-                    flushReceived();
-                    blocks.push({ type: 'sent', text: cmd });
+                // Check if this line has ❯ prompt
+                const promptMatch = line.match(/^(.*?)❯\s?(.*)/);
+                if (promptMatch) {
+                    // Flush whatever was pending
+                    if (mode === 'sent') flushSent();
+                    else flushReceived();
+                    // Start new sent block
+                    mode = 'sent';
+                    const cmd = promptMatch[2];
+                    if (cmd) sentLines.push(cmd);
+                    continue;
+                }
+
+                if (mode === 'sent') {
+                    // In sent mode: blank line ends the input
+                    if (line.trim() === '') {
+                        flushSent();
+                        mode = 'received';
+                    } else {
+                        sentLines.push(line);
+                    }
                 } else {
+                    // In received mode: collect until next ❯
                     receivedLines.push(line);
                 }
             }
-            flushReceived();
+            // Flush remaining
+            if (mode === 'sent') flushSent();
+            else flushReceived();
 
             if (blocks.length === 0) return;
 
