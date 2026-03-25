@@ -1603,30 +1603,45 @@
                 let html = '';
                 let curStyle = '', spanOpen = false;
                 const cols = line.length;
+                // CRITICAL: reuse cell object for correct data (xterm.js requirement)
+                let cell = line.getCell(0);
+                if (!cell) return { text, html: escText(text) };
                 for (let x = 0; x < cols; x++) {
-                    const c = line.getCell(x);
-                    if (!c) continue;
-                    const ch = c.getChars();
+                    cell = line.getCell(x, cell);
+                    if (!cell) break;
+                    const ch = cell.getChars();
                     if (!ch) continue;
-                    // Build style string for this cell
                     let style = '';
                     try {
-                        const fgMode = c.getFgColorMode();
-                        const fgVal = c.getFgColor();
+                        const fgMode = cell.getFgColorMode();
+                        const fgVal = cell.getFgColor();
                         let color = null;
-                        if (fgMode === 1 && fgVal >= 0 && fgVal < 16) color = ANSI16[fgVal];
-                        else if (fgMode === 2 && fgVal >= 0 && fgVal < 256) color = ANSI256[fgVal];
-                        else if (fgMode === 3 && fgVal > 0) {
+                        // mode 1 = palette (could be 0-15 or 0-255 depending on xterm version)
+                        if (fgMode === 1) {
+                            if (fgVal < 16) color = ANSI16[fgVal];
+                            else if (fgVal < 256) color = ANSI256[fgVal];
+                        }
+                        // mode 2 = RGB (24-bit) OR 256-palette in some xterm builds
+                        else if (fgMode === 2) {
+                            if (fgVal < 256) color = ANSI256[fgVal];
+                            else {
+                                color = '#' + ((fgVal >> 16) & 0xff).toString(16).padStart(2,'0')
+                                           + ((fgVal >> 8) & 0xff).toString(16).padStart(2,'0')
+                                           + (fgVal & 0xff).toString(16).padStart(2,'0');
+                            }
+                        }
+                        // mode 3 = RGB in newer xterm.js
+                        else if (fgMode === 3) {
                             color = '#' + ((fgVal >> 16) & 0xff).toString(16).padStart(2,'0')
                                        + ((fgVal >> 8) & 0xff).toString(16).padStart(2,'0')
                                        + (fgVal & 0xff).toString(16).padStart(2,'0');
                         }
                         if (color) style += 'color:' + color + ';';
-                        if (c.isBold && c.isBold()) style += 'font-weight:700;';
-                        if (c.isItalic && c.isItalic()) style += 'font-style:italic;';
-                        if (c.isUnderline && c.isUnderline()) style += 'text-decoration:underline;';
+                        // isBold/isItalic/isUnderline return 0 or 1, not boolean
+                        if (cell.isBold && cell.isBold() === 1) style += 'font-weight:700;';
+                        if (cell.isItalic && cell.isItalic() === 1) style += 'font-style:italic;';
+                        if (cell.isUnderline && cell.isUnderline() === 1) style += 'text-decoration:underline;';
                     } catch(e) {}
-                    // Only open/close span when style changes
                     if (style !== curStyle) {
                         if (spanOpen) { html += '</span>'; spanOpen = false; }
                         if (style) { html += '<span style="' + style + '">'; spanOpen = true; }

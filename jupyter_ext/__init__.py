@@ -229,21 +229,27 @@ class WorkspaceFileHandler(IPythonHandler):
 
         # Image or raw mode: serve as binary
         if raw_mode is not None or ext in IMAGE_CONTENT_TYPES:
-            ct = IMAGE_CONTENT_TYPES.get(ext, 'application/octet-stream')
-            self.set_header("Content-Type", ct)
-            self.set_header("Cache-Control", "public, max-age=3600")
             try:
-                self.finish(full_path.read_bytes())
+                data = full_path.read_bytes()
             except Exception as e:
                 raise web.HTTPError(500, "Read error: %s" % str(e))
+            ct = IMAGE_CONTENT_TYPES.get(ext, 'application/octet-stream')
+            self.set_header("Content-Type", ct)
+            self.set_header("Content-Length", str(len(data)))
+            self.set_header("Cache-Control", "public, max-age=3600")
+            self.write(data)
+            self.finish()
             return
 
         try:
             content = full_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             # Binary file that's not in IMAGE_CONTENT_TYPES — serve raw
+            data = full_path.read_bytes()
             self.set_header("Content-Type", "application/octet-stream")
-            self.finish(full_path.read_bytes())
+            self.set_header("Content-Length", str(len(data)))
+            self.write(data)
+            self.finish()
             return
         except Exception as e:
             raise web.HTTPError(500, str(e))
