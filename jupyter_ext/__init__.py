@@ -274,6 +274,21 @@ class WorkspaceFileHandler(IPythonHandler):
 TERMINAL_UPLOAD_DIR = "uploads"  # Fixed subdir for terminal uploads
 
 
+def unique_filepath(dest: Path, fname: str) -> Path:
+    """Return a non-colliding path: name.ext → name (1).ext → name (2).ext ..."""
+    fpath = dest / fname
+    if not fpath.exists():
+        return fpath
+    stem = Path(fname).stem
+    suffix = Path(fname).suffix
+    i = 1
+    while True:
+        candidate = dest / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
 class WorkspaceUploadHandler(IPythonHandler):
     """Upload files to workspace."""
     @web.authenticated
@@ -291,7 +306,7 @@ class WorkspaceUploadHandler(IPythonHandler):
                 fname = Path(f["filename"]).name  # sanitize
                 if not fname:
                     continue
-                fpath = dest / fname
+                fpath = unique_filepath(dest, fname)
                 fpath.write_bytes(f["body"])
                 uploaded.append(str(fpath.relative_to(workspace)))
         self.set_header("Content-Type", "application/json; charset=utf-8")
@@ -355,10 +370,10 @@ class TerminalUploadHandler(IPythonHandler):
                 fname = Path(f["filename"]).name
                 if not fname:
                     continue
-                fpath = upload_dir / fname
+                fpath = unique_filepath(upload_dir, fname)
                 fpath.write_bytes(f["body"])
                 results.append({
-                    "name": fname,
+                    "name": fpath.name,
                     "path": str(fpath),
                     "relative": str(fpath.relative_to(workspace)),
                     "size": len(f["body"]),
