@@ -11,6 +11,7 @@ const termList = document.getElementById('termList');
 const termPlaceholder = document.getElementById('termPlaceholder');
 const termToolbar = document.getElementById('termToolbar');
 const terminalContainer = document.getElementById('terminalContainer');
+const termBody = document.querySelector('.term-body');
 const termTitle = document.getElementById('termTitle');
 const statusDot = document.getElementById('statusDot');
 const newTermBtn = document.getElementById('newTermBtn');
@@ -28,18 +29,12 @@ const chatToggleBtn = document.getElementById('chatToggleBtn');
 const chatView = document.getElementById('chatView');
 const chatMessages = document.getElementById('chatMessages');
 const chatScrollAnchor = document.getElementById('chatScrollAnchor');
-const chatInputField = document.getElementById('chatInputField');
-const chatInputSend = document.getElementById('chatInputSend');
-const chatBackBtn = document.getElementById('chatBackBtn');
-const chatExpandBtn = document.getElementById('chatExpandBtn');
-const chatAvatar = document.getElementById('chatAvatar');
-const chatContactName = document.getElementById('chatContactName');
-const chatContactStatus = document.getElementById('chatContactStatus');
 let typingRow = null; // dynamically created typing indicator in chatMessages
 const configModalOverlay = document.getElementById('configModalOverlay');
 const configModalTitle = document.getElementById('configModalTitle');
 const configNameInput = document.getElementById('configNameInput');
 const configCmdInput = document.getElementById('configCmdInput');
+const configChatMode = document.getElementById('configChatMode');
 const configCancelBtn = document.getElementById('configCancelBtn');
 const configConfirmBtn = document.getElementById('configConfirmBtn');
 
@@ -59,11 +54,7 @@ let slotMap = {};  // termName -> slot
 
 // Shared file upload helpers
 const XSRF = window.__XSRF_TOKEN || '';
-let chatPendingFileList = [];
 let termPendingFileList = [];
-const chatFileInput = document.getElementById('chatFileInput');
-const chatPendingFiles = document.getElementById('chatPendingFiles');
-const chatAttachBtn = document.querySelector('.chat-attach-btn');
 const termFileInput = document.getElementById('termFileInput');
 const termPendingFiles = document.getElementById('termPendingFiles');
 const termAttachBtn = document.querySelector('.term-attach-btn');
@@ -118,10 +109,58 @@ function getXsrf() {
     return m ? decodeURIComponent(m[1]) : '';
 }
 
+let inputBarManualHeight = 0; // 0 = auto mode
+
 function autoResizeInput() {
+    if (inputBarManualHeight) return; // manual resize active, skip auto
     termInputField.style.height = 'auto';
     termInputField.style.height = Math.min(termInputField.scrollHeight, 120) + 'px';
 }
+
+// Input bar drag-resize
+const inputResizeHandle = document.getElementById('inputResizeHandle');
+(function setupInputResize() {
+    let startY = 0, startH = 0;
+    function onMouseDown(e) {
+        e.preventDefault();
+        startY = e.clientY || e.touches[0].clientY;
+        startH = termInputBar.offsetHeight;
+        inputResizeHandle.classList.add('active');
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+        document.addEventListener('touchmove', onMouseMove, { passive: false });
+        document.addEventListener('touchend', onMouseUp);
+    }
+    function onMouseMove(e) {
+        e.preventDefault();
+        const y = e.clientY !== undefined ? e.clientY : e.touches[0].clientY;
+        const delta = startY - y;
+        const newH = Math.max(44, Math.min(startH + delta, window.innerHeight * 0.5));
+        inputBarManualHeight = newH;
+        termInputBar.style.height = newH + 'px';
+        termInputField.style.height = '100%';
+        termInputField.style.maxHeight = 'none';
+    }
+    function onMouseUp() {
+        inputResizeHandle.classList.remove('active');
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        document.removeEventListener('touchmove', onMouseMove);
+        document.removeEventListener('touchend', onMouseUp);
+        if (fitAddon) fitAddon.fit();
+    }
+    inputResizeHandle.addEventListener('mousedown', onMouseDown);
+    inputResizeHandle.addEventListener('touchstart', onMouseDown, { passive: false });
+    // Double-click to reset to auto
+    inputResizeHandle.addEventListener('dblclick', () => {
+        inputBarManualHeight = 0;
+        termInputBar.style.height = '';
+        termInputField.style.height = '';
+        termInputField.style.maxHeight = '';
+        autoResizeInput();
+        if (fitAddon) fitAddon.fit();
+    });
+})();
 
 // Sidebar toggle
 function openSidebar() {
@@ -136,6 +175,65 @@ function closeSidebar() {
         termSidebar.classList.add('collapsed');
     }
 }
+
+// Long-press to show selectable text overlay (mobile terminal copy)
+const termSelectOverlay = document.getElementById('termSelectOverlay');
+const termSelectText = document.getElementById('termSelectText');
+(function setupLongPressSelect() {
+    let pressTimer = null;
+    const LONG_PRESS_MS = 500;
+
+    function getBufferText() {
+        if (!currentTerm) return '';
+        const buf = currentTerm.buffer.active;
+        const lines = [];
+        for (let i = 0; i <= buf.baseY + buf.cursorY; i++) {
+            const line = buf.getLine(i);
+            if (line) lines.push(line.translateToString(true));
+        }
+        return lines.join('\n').replace(/\s+$/, '');
+    }
+
+    function showOverlay() {
+        const text = getBufferText();
+        if (!text) return;
+        termSelectText.textContent = text;
+        termSelectOverlay.classList.add('active');
+        // Scroll to bottom
+        termSelectOverlay.scrollTop = termSelectOverlay.scrollHeight;
+    }
+
+    function hideOverlay() {
+        termSelectOverlay.classList.remove('active');
+        termSelectText.textContent = '';
+    }
+
+    terminalContainer.addEventListener('touchstart', (e) => {
+        pressTimer = setTimeout(showOverlay, LONG_PRESS_MS);
+    }, { passive: true });
+
+    terminalContainer.addEventListener('touchend', () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+    terminalContainer.addEventListener('touchmove', () => {
+        if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+
+    // Close overlay when tapping outside the text, or pressing back
+    termSelectOverlay.addEventListener('click', (e) => {
+        if (e.target === termSelectOverlay) hideOverlay();
+    });
+
+    // Also close on toolbar button clicks or terminal switch
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && termSelectOverlay.classList.contains('active')) {
+            hideOverlay();
+        }
+    });
+
+    // Expose for external use
+    window._hideTermSelectOverlay = hideOverlay;
+})();
 
 // Send multiline commands with 3s interval via WebSocket
 function sendMultilineCommand(ws, commandText) {
@@ -167,13 +265,13 @@ function buildSlotMap(terminals) {
     return map;
 }
 
-async function setServerSlot(slot, displayName, command) {
-    serverSlots[slot] = { display_name: displayName, command: command || "" };
+async function setServerSlot(slot, displayName, command, isChatMode) {
+    serverSlots[slot] = { display_name: displayName, command: command || "", chat_mode: !!isChatMode };
     try {
         await fetch(NAMES_API, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', 'X-XSRFToken': getXsrf() },
-            body: JSON.stringify({ slot, display_name: displayName, command: command || "" }),
+            body: JSON.stringify({ slot, display_name: displayName, command: command || "", chat_mode: !!isChatMode }),
         });
     } catch (e) { /* ignore */ }
 }
@@ -215,9 +313,11 @@ function showConfigModal(termName) {
         const currentCmd = cfg.command || "";
         configNameInput.value = currentDisplay;
         configCmdInput.value = currentCmd;
+        configChatMode.checked = !!cfg.chat_mode;
     } else {
         configNameInput.value = '';
         configCmdInput.value = '';
+        configChatMode.checked = false;
     }
 
     configModalOverlay.classList.add('active');
@@ -242,6 +342,7 @@ configConfirmBtn.addEventListener('click', () => {
     closeConfigModal({
         name: configNameInput.value.trim(),
         command: configCmdInput.value,
+        chat_mode: configChatMode.checked,
     });
 });
 configNameInput.addEventListener('keydown', (e) => {
@@ -301,6 +402,7 @@ function renderList(terminals) {
         item.addEventListener('click', (e) => {
             if (e.target.closest('.term-item-close')) return;
             if (e.target.closest('.term-item-name')?.isContentEditable) return;
+            if (isMobile) closeSidebar();
             connectTerminal(t.name);
         });
         // Double-click name to rename
@@ -322,10 +424,10 @@ function startRename(nameEl, termName) {
     showConfigModal(termName);
 }
 
-async function renameTerminal(name, displayName, command) {
+async function renameTerminal(name, displayName, command, chatModeFlag) {
     const slot = slotMap[name];
     if (!slot) return;
-    await setServerSlot(slot, displayName, command);
+    await setServerSlot(slot, displayName, command, chatModeFlag);
     // Try API rename too (works with standalone server)
     try {
         await fetch(JUPYTER + '/api/terminals/' + name, {
@@ -517,6 +619,7 @@ function setupResizeObserver() {
 // Connect to terminal — orchestrator
 function connectTerminal(name) {
     disconnect();
+    if (window._hideTermSelectOverlay) window._hideTermSelectOverlay();
     currentName = name;
     currentDisplayName = getDisplayName(terminalData[name] || {name: name});
 
@@ -524,6 +627,7 @@ function connectTerminal(name) {
     chatMode = false;
     chatToggleBtn.classList.remove('active');
     chatView.classList.remove('active');
+    termBody.style.display = '';
     chatMessages.innerHTML = '';
     chatLastLine = 0;
     lastChatTimeStr = '';
@@ -536,6 +640,12 @@ function connectTerminal(name) {
     termInputBar.classList.remove('hidden');
     scrollbar.classList.add('active');
     termTitle.textContent = currentDisplayName;
+
+    // Auto-open chat mode if configured
+    const slotCfg = getSlotConfig(name);
+    if (slotCfg && slotCfg.chat_mode) {
+        setTimeout(() => openChat(), 100);
+    }
 
     // Mark active in list
     document.querySelectorAll('.term-item').forEach(el => {
@@ -579,6 +689,7 @@ function disconnect() {
 // ========== TERMINAL INPUT ==========
 
 async function sendInput() {
+    if (chatMode) return chatSendInput();
     const text = termInputField.value.trim();
     if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
     // Upload pending files first (only if message provided)
@@ -656,11 +767,6 @@ function renderPendingFiles(container, fileList, attachBtn) {
     });
 }
 
-chatFileInput.addEventListener('change', () => {
-    for (const f of chatFileInput.files) chatPendingFileList.push(f);
-    chatFileInput.value = '';
-    renderPendingFiles(chatPendingFiles, chatPendingFileList, chatAttachBtn);
-});
 termFileInput.addEventListener('change', () => {
     for (const f of termFileInput.files) termPendingFileList.push(f);
     termFileInput.value = '';
@@ -684,52 +790,61 @@ async function uploadPendingFiles(fileList) {
 function openChat() {
     chatMode = true;
     chatToggleBtn.classList.add('active');
-    chatContactName.textContent = currentDisplayName || 'Terminal';
-    chatAvatar.textContent = (currentDisplayName || 'T').charAt(0).toUpperCase();
-    chatContactStatus.textContent = 'Connected';
-    chatContactStatus.classList.remove('typing');
     chatMessages.innerHTML = '';
     chatLastLine = 0;
     lastChatTimeStr = '';
     phase = 'idle';
+    termBody.style.display = 'none';
     chatView.classList.add('active');
     snapshotBuffer();
     scrollChatToBottom();
     chatSnapshotTimer = setInterval(() => {
         if (phase === 'idle') snapshotBuffer();
     }, 500);
-    chatInputField.focus();
+    termInputField.focus();
 }
 
 function closeChat() {
     chatMode = false;
     chatToggleBtn.classList.remove('active');
     chatView.classList.remove('active');
-    chatView.classList.remove('fullscreen');
+    termBody.style.display = '';
     if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
     hideTyping();
     phase = 'idle';
     if (fitAddon) setTimeout(() => fitAddon.fit(), 50);
 }
 
-chatToggleBtn.addEventListener('click', () => { chatMode ? closeChat() : openChat(); });
-chatBackBtn.addEventListener('click', closeChat);
-chatExpandBtn.addEventListener('click', () => { chatView.classList.toggle('fullscreen'); });
+chatToggleBtn.addEventListener('click', async () => {
+    if (chatMode) {
+        closeChat();
+    } else {
+        openChat();
+    }
+    // Persist chat_mode to server slot
+    if (currentName) {
+        const slot = slotMap[currentName];
+        const cfg = getSlotConfig(currentName) || {};
+        if (slot) {
+            await setServerSlot(slot, cfg.display_name || currentDisplayName, cfg.command || "", chatMode);
+        }
+    }
+});
 
 // Send user input -> start two-phase detection
 async function chatSendInput() {
-    const text = chatInputField.value.trim();
+    const text = termInputField.value.trim();
     if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
     // Upload pending files first (only if message provided)
     let uploadedMeta = '';
-    if (chatPendingFileList.length) {
+    if (termPendingFileList.length) {
         try {
-            const data = await uploadPendingFiles(chatPendingFileList);
+            const data = await uploadPendingFiles(termPendingFileList);
             uploadedMeta = data.files.map(f => `File uploaded: ${f.path} (${f.size} bytes, ${f.content_type})`).join('\n');
             for (const f of data.files) addChatBubble('sent', `📎 ${f.name}`);
         } catch (err) { alert('Upload failed: ' + err.message); return; }
-        chatPendingFileList = [];
-        renderPendingFiles(chatPendingFiles, chatPendingFileList, chatAttachBtn);
+        termPendingFileList = [];
+        renderPendingFiles(termPendingFiles, termPendingFileList, termAttachBtn);
     }
     // Stop history polling, switch to output detection
     if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
@@ -747,8 +862,8 @@ async function chatSendInput() {
         if (currentWs && currentWs.readyState === WebSocket.OPEN)
             currentWs.send(JSON.stringify(["stdin", "\r"]));
     }, 50);
-    chatInputField.value = '';
-    chatAutoResize();
+    termInputField.value = '';
+    autoResizeInput();
     chatSnapshotTimer = setInterval(pollOutput, 300);
 }
 
@@ -820,19 +935,6 @@ function finishOutput(buf, totalLines) {
     }, 500);
 }
 
-function chatAutoResize() {
-    chatInputField.style.height = 'auto';
-    chatInputField.style.height = Math.min(chatInputField.scrollHeight, 100) + 'px';
-}
-chatInputField.addEventListener('input', chatAutoResize);
-chatInputSend.addEventListener('click', chatSendInput);
-chatInputField.addEventListener('keydown', (e) => {
-    const mob = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (e.key === 'Enter' && !mob && !e.shiftKey) {
-        e.preventDefault();
-        chatSendInput();
-    }
-});
 
 function showTyping() {
     if (typingRow) return; // already showing
@@ -840,8 +942,6 @@ function showTyping() {
     typingRow.className = 'chat-typing-row active';
     typingRow.innerHTML = '<div class="chat-typing-bubble"><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div><div class="chat-typing-dot"></div></div>';
     chatMessages.appendChild(typingRow);
-    chatContactStatus.textContent = 'typing...';
-    chatContactStatus.classList.add('typing');
     scrollChatToBottom();
 }
 
@@ -850,8 +950,6 @@ function hideTyping() {
         typingRow.remove();
         typingRow = null;
     }
-    chatContactStatus.textContent = 'Connected';
-    chatContactStatus.classList.remove('typing');
 }
 
 function addChatBubble(type, text, html) {
@@ -1245,7 +1343,7 @@ newTermBtn.addEventListener('click', async () => {
             slotMap = buildSlotMap(Object.values(terminalData));
             const slot = slotMap[data.name];
             if (slot) {
-                await setServerSlot(slot, result.name, result.command);
+                await setServerSlot(slot, result.name, result.command, result.chat_mode);
             }
         }
         // No name -> temporary terminal (not saved, disappears on restart)
@@ -1288,7 +1386,14 @@ renameBtn.addEventListener('click', async () => {
     const result = await showConfigModal(currentName);
     if (result === null) return;
     const finalName = result.name || currentDisplayName;
-    await renameTerminal(currentName, finalName, result.command);
+    await renameTerminal(currentName, finalName, result.command, result.chat_mode);
+    // Apply chat mode change immediately
+    const cfg = getSlotConfig(currentName);
+    if (cfg && cfg.chat_mode && !chatMode) {
+        openChat();
+    } else if (cfg && !cfg.chat_mode && chatMode) {
+        closeChat();
+    }
 });
 
 loadTerminals();

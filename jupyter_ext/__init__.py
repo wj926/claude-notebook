@@ -213,7 +213,8 @@ class TerminalNamesHandler(BaseHandler):
         if not slot:
             raise web.HTTPError(400, "slot required")
         names = _read_names()
-        names[str(slot)] = {"display_name": display_name, "command": command}
+        chat_mode = body.get("chat_mode", False)
+        names[str(slot)] = {"display_name": display_name, "command": command, "chat_mode": chat_mode}
         _write_names(names)
         self.json_response({"ok": True})
 

@@ -4,10 +4,40 @@
 
 A Jupyter Notebook extension that adds a **Notion-like file browser** and **terminal management UI** — designed as a lightweight, self-hosted alternative to Claude Code Remote.
 
+## Screenshots
+
+#### File Browser (Desktop / Mobile)
+
+<p>
+  <img src="images/viewer_desktop.png" width="600">
+  <img src="images/viewer_mobile.png" width="200">
+</p>
+
+- Notion-style grid view with folder/file icons
+- Sidebar tree navigation with expandable folders
+- Responsive layout — collapsible sidebar on mobile with hamburger menu
+
+#### Terminal Manager (Desktop / Mobile)
+
+<p>
+  <img src="images/terminal_desktop.png" width="600">
+  <img src="images/terminal_mobile.png" width="200">
+</p>
+
+- Multi-terminal sidebar with status indicators
+- xterm.js-powered terminal with VS Code dark theme
+- iMessage-style chat view for conversational interaction with Claude Code
+- File upload and command input bar with drag-resize
+
 ## Features
 
-- **File Browser**: Navigate your workspace with a clean, Notion-style interface with syntax highlighting
-- **Terminal Manager**: Create, rename, switch between, and shut down multiple terminal sessions
+- **File Browser**: Navigate your workspace with a Notion-style interface — syntax highlighting, Markdown rendering, image preview, and inline editing
+- **CSV Viewer**: Interactive table with column sorting, filtering, resizable columns, row coloring, and cell copy
+- **Terminal Manager**: Create, rename, configure, and switch between multiple persistent terminal sessions
+- **Chat Mode**: iMessage-style chat view that renders terminal output as conversation bubbles with ANSI color support
+- **File Upload**: Drag-and-drop file/folder upload with automatic filename collision handling
+- **Server Config**: Terminal names, startup commands, chat mode preference, and CSV settings persist on the server
+- **Mobile Ready**: Fully responsive design with touch-optimized UI, collapsible sidebar, and terminal copy support
 - **Claude Code Ready**: Run multiple Claude Code instances simultaneously in separate terminals
 - **Zero Config**: Automatically uses Jupyter's `notebook_dir` as the workspace path
 
@@ -42,8 +72,8 @@ All dependencies are managed via `requirements.txt`.
 
 For a detailed setup guide and usage walkthrough, see the blog post:
 
-- **English**: [Workspace Viewer: A Self-Hosted Claude Code Remote Alternative via Jupyter Notebook](https://trustworthyai.co.kr/article/2026/workspace-viewer-eng/)
-- **한국어**: [Workspace Viewer: Jupyter Notebook를 활용한 셀프 호스팅 Claude Code Remote 대안](https://trustworthyai.co.kr/article/2026/workspace-viewer/)
+- **English**: [Claude Notebook: A Self-Hosted Claude Code Remote Alternative via Jupyter Notebook](https://trustworthyai.co.kr/article/2026/claude-notebook-eng/)
+- **한국어**: [Claude Notebook: Jupyter Notebook를 활용한 셀프 호스팅 Claude Code Remote 대안](https://trustworthyai.co.kr/article/2026/claude-notebook/)
 
 ## License
 
