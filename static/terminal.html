@@ -1621,28 +1621,24 @@
             if (Date.now() - idleSince < IDLE_THRESHOLD) return;
 
             // Idle timeout reached — output is done!
-            // Collect all lines from pendingOutputStart to current
-            // Skip the first line if it looks like the echoed command (contains the prompt char)
+            // Collect all lines from pendingOutputStart, trim only blank/prompt at edges
             let outputFrom = pendingOutputStart;
-            const firstLine = buf.getLine(pendingOutputStart);
-            if (firstLine) {
-                const firstText = firstLine.translateToString(true);
-                if (/❯/.test(firstText) || /\$\s/.test(firstText)) {
-                    outputFrom = pendingOutputStart + 1;
-                }
-            }
-
-            // Find last meaningful line (skip trailing prompt/blank lines)
             let outputTo = totalLines;
-            for (let i = totalLines - 1; i >= outputFrom; i--) {
+
+            // Skip leading lines that are just the echoed command (starts with ❯)
+            for (let i = outputFrom; i < outputTo; i++) {
                 const line = buf.getLine(i);
                 if (!line) continue;
                 const text = line.translateToString(true);
-                // Stop at trailing prompt or blank lines
-                if (/^❯/.test(text) || /[❯\$%>]\s*$/.test(text) || !text.trim()) {
-                    outputTo = i;
-                    continue;
-                }
+                if (/^❯/.test(text)) { outputFrom = i + 1; continue; }
+                break;
+            }
+            // Trim trailing bare prompt line only (exactly ❯ with nothing else)
+            for (let i = outputTo - 1; i >= outputFrom; i--) {
+                const line = buf.getLine(i);
+                if (!line) continue;
+                const text = line.translateToString(true);
+                if (!text.trim() || /^❯\s*$/.test(text)) { outputTo = i; continue; }
                 break;
             }
 
