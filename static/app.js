@@ -44,7 +44,6 @@
         sidebar.classList.remove('collapsed');
         sidebarOverlay.classList.add('active');
         divider.style.display = '';
-        updateTogglePosition();
     }
     function closeSidebar() {
         sidebar.classList.remove('open');
@@ -52,14 +51,6 @@
         if (!isMobile()) {
             sidebar.classList.add('collapsed');
             divider.style.display = 'none';
-        }
-        updateTogglePosition();
-    }
-    function updateTogglePosition() {
-        if (isMobile() || sidebar.classList.contains('collapsed')) {
-            sidebarToggle.style.left = '6px';
-        } else {
-            sidebarToggle.style.left = (sidebar.offsetWidth - 30) + 'px';
         }
     }
     sidebarToggle.addEventListener('click', () => {
@@ -71,10 +62,6 @@
     });
     sidebarClose.addEventListener('click', closeSidebar);
     sidebarOverlay.addEventListener('click', closeSidebar);
-    // Keep toggle position in sync with sidebar width changes
-    window.addEventListener('resize', updateTogglePosition);
-    // Initial position
-    updateTogglePosition();
 
     // === Terminal button ===
     document.getElementById('terminalBtn').addEventListener('click', () => {
@@ -87,7 +74,7 @@
     // === Sidebar resize ===
     let isResizing = false;
     divider.addEventListener('mousedown', () => { isResizing = true; divider.classList.add('active'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; });
-    document.addEventListener('mousemove', (e) => { if (isResizing) { sidebar.style.width = Math.min(Math.max(e.clientX, 200), 480) + 'px'; updateTogglePosition(); } });
+    document.addEventListener('mousemove', (e) => { if (isResizing) sidebar.style.width = Math.min(Math.max(e.clientX, 200), 480) + 'px'; });
     document.addEventListener('mouseup', () => { if (isResizing) { isResizing = false; divider.classList.remove('active'); document.body.style.cursor = ''; document.body.style.userSelect = ''; } });
 
     // === Utility ===

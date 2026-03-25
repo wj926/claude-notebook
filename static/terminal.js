@@ -123,14 +123,19 @@ function autoResizeInput() {
     termInputField.style.height = Math.min(termInputField.scrollHeight, 120) + 'px';
 }
 
-// Mobile sidebar
+// Sidebar toggle
+function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
 function openSidebar() {
     termSidebar.classList.add('open');
+    termSidebar.classList.remove('collapsed');
     mobileOverlay.classList.add('active');
 }
 function closeSidebar() {
     termSidebar.classList.remove('open');
     mobileOverlay.classList.remove('active');
+    if (!isMobile()) {
+        termSidebar.classList.add('collapsed');
+    }
 }
 
 // Send multiline commands with 3s interval via WebSocket
@@ -1198,9 +1203,13 @@ document.querySelectorAll('input, textarea').forEach(el => {
 
 // ========== INIT ==========
 
-// Mobile sidebar
+// Sidebar toggle
 mobileToggle.addEventListener('click', () => {
-    termSidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+    if (isMobile()) {
+        termSidebar.classList.contains('open') ? closeSidebar() : openSidebar();
+    } else {
+        termSidebar.classList.contains('collapsed') ? openSidebar() : closeSidebar();
+    }
 });
 mobileOverlay.addEventListener('click', closeSidebar);
 
