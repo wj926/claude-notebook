@@ -609,7 +609,7 @@
         .chat-msg-row.received .chat-bubble.live-term {
             width: 100%;
             min-width: 0;
-            padding: 6px;
+            padding: 4px;
             background: #1e1e1e;
             border-color: #333;
             border-radius: 12px;
@@ -618,12 +618,13 @@
             font-family: inherit;
             font-size: inherit;
             line-height: normal;
+            max-height: 50vh;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm {
-            height: 100%;
+            height: auto;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm-viewport {
-            overflow-y: auto !important;
+            overflow-y: hidden !important;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm-screen {
             width: 100% !important;
@@ -1417,7 +1418,18 @@
                         currentTerm.write(msg[1]);
                         // Dual-write to live xterm in chat bubble
                         if (liveActive && liveTerm) {
-                            liveTerm.write(msg[1]);
+                            if (liveSkipFirstPrompt) {
+                                // Skip data until first newline (the echoed command line)
+                                const nlIdx = msg[1].indexOf('\n');
+                                if (nlIdx >= 0) {
+                                    liveSkipFirstPrompt = false;
+                                    const after = msg[1].substring(nlIdx + 1);
+                                    if (after) liveTerm.write(after);
+                                }
+                                // else: still waiting for echo to complete, skip entirely
+                            } else {
+                                liveTerm.write(msg[1]);
+                            }
                         }
                     } else if (msg[0] === 'disconnect') {
                         statusDot.classList.add('disconnected');
@@ -1636,6 +1648,8 @@
             chatAutoResize();
         }
 
+        let liveSkipFirstPrompt = false; // skip the echoed prompt line
+
         function createLiveTermBubble() {
             // Destroy previous live term if exists
             destroyLiveTerm();
@@ -1647,14 +1661,17 @@
             row.appendChild(bubble);
             chatMessages.appendChild(row);
 
+            liveSkipFirstPrompt = true;
+
             // Wait for layout to settle, then measure and create xterm
             requestAnimationFrame(() => {
                 const bubbleWidth = bubble.clientWidth;
                 if (bubbleWidth < 50) return; // safety check
+                const approxCols = Math.floor((bubbleWidth - 8) / 7.8);
 
                 // Create xterm instance (same dark theme as main terminal)
                 liveTerm = new Terminal({
-                    cursorBlink: false,
+                    cursorBlink: true,
                     fontSize: 13,
                     fontFamily: "'SFMono-Regular', 'Fira Code', 'Consolas', 'Courier New', monospace",
                     theme: {
@@ -1671,11 +1688,11 @@
                         cyan: '#4ec9b0',
                         white: '#d4d4d4',
                     },
-                    scrollback: 5000,
+                    scrollback: 0,
                     disableStdin: true,
                     allowProposedApi: true,
-                    cols: Math.floor((bubbleWidth - 12) / 7.8), // approximate char width
-                    rows: 10,
+                    cols: approxCols,
+                    rows: 2,
                 });
                 liveFit = new FitAddon.FitAddon();
                 liveTerm.loadAddon(liveFit);
@@ -1683,17 +1700,31 @@
                 liveBubble = bubble;
                 liveActive = true;
 
-                // Fit to actual bubble width
+                // Fit cols to bubble width (keep rows small, we grow dynamically)
                 setTimeout(() => {
-                    if (liveFit) try { liveFit.fit(); } catch(e) {}
+                    if (liveFit) try {
+                        const dims = liveFit.proposeDimensions();
+                        if (dims) liveTerm.resize(dims.cols, liveTerm.rows);
+                    } catch(e) {}
                     scrollChatToBottom();
                 }, 30);
 
-                // Periodic scroll to keep chat at bottom while output streams
+                // Periodic: auto-grow rows to fit content + scroll chat
                 if (liveScrollTimer) clearInterval(liveScrollTimer);
                 liveScrollTimer = setInterval(() => {
-                    if (liveActive) scrollChatToBottom();
-                }, 300);
+                    if (!liveActive || !liveTerm) return;
+                    // Grow rows to match content (so no internal scroll needed)
+                    const buf = liveTerm.buffer.active;
+                    const contentLines = buf.baseY + buf.cursorY + 1;
+                    const maxRows = 30;
+                    const needed = Math.min(Math.max(contentLines, 2), maxRows);
+                    if (liveTerm.rows !== needed) {
+                        const dims = liveFit ? liveFit.proposeDimensions() : null;
+                        const cols = dims ? dims.cols : liveTerm.cols;
+                        liveTerm.resize(cols, needed);
+                    }
+                    scrollChatToBottom();
+                }, 250);
             });
         }
         function chatAutoResize() {
