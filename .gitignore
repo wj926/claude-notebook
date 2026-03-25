@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 *.pyo
 .terminal_names.json
+config/
 .agent/
