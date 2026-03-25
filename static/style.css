@@ -240,6 +240,8 @@ html, body {
 /* === Finder Grid View === */
 .finder {
     padding: 20px 24px 40px;
+    min-height: 100%;
+    box-sizing: border-box;
 }
 .finder-toolbar {
     display: flex;
