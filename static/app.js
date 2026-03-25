@@ -709,6 +709,11 @@
     }
 
     function renderCsvEditTable() {
+        // Save scroll position before re-render
+        const oldScroll = previewBody.querySelector('.csv-edit-scroll');
+        const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
+        const scrollLeft = oldScroll ? oldScroll.scrollLeft : 0;
+
         const rows = csvEditRows;
         const maxCols = Math.max(...rows.map(r => r.length));
         // Normalize column count
@@ -747,6 +752,10 @@
         html += '</tbody></table></div></div>';
 
         previewBody.innerHTML = html;
+
+        // Restore scroll position
+        const newScroll = previewBody.querySelector('.csv-edit-scroll');
+        if (newScroll) { newScroll.scrollTop = scrollTop; newScroll.scrollLeft = scrollLeft; }
 
         // Bind cell edits
         previewBody.querySelectorAll('.csv-cell').forEach(td => {

@@ -808,7 +808,8 @@ html, body {
 .term-sidebar.collapsed {
     display: none;
 }
-.term-sidebar.collapsed ~ .term-main .term-toolbar {
+.term-sidebar.collapsed ~ .term-main .term-toolbar,
+.term-sidebar.collapsed ~ .term-main .chat-header {
     padding-left: 48px;
 }
 .mobile-overlay {
@@ -837,7 +838,8 @@ html, body {
         z-index: 999;
         background: rgba(0,0,0,0.4);
     }
-    .term-toolbar {
+    .term-toolbar,
+    .chat-header {
         padding-left: 48px;
     }
     .term-input-bar {

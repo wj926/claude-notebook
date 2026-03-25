@@ -137,8 +137,9 @@ html, body {
 .sidebar.collapsed + .divider {
     display: none;
 }
-.sidebar.collapsed ~ .content .finder-toolbar {
-    padding-left: 44px;
+.sidebar.collapsed ~ .content .finder-toolbar,
+.sidebar.collapsed ~ .content .preview-header {
+    padding-left: 48px;
 }
 
 /* Overlay behind sidebar on mobile */
@@ -920,8 +921,9 @@ tr:first-child .csv-row-actions {
         padding: 12px 12px 20px;
     }
 
-    .finder-toolbar {
-        padding-left: 44px;
+    .finder-toolbar,
+    .preview-header {
+        padding-left: 48px;
     }
 
     .finder-grid {
