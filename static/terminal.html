@@ -624,7 +624,8 @@
             height: auto;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm-viewport {
-            overflow-y: hidden !important;
+            overflow-y: auto !important;
+            scrollbar-width: thin;
         }
         .chat-msg-row.received .chat-bubble.live-term .xterm-screen {
             width: 100% !important;
@@ -1741,10 +1742,10 @@
             }
         });
 
-        // ANSI 16-color palette — GitHub-style for light background (#f6f8fa)
+        // ANSI 16-color palette — matched to dark terminal theme, adjusted for light bg
         const ANSI16 = [
-            '#1f2328','#cf222e','#116329','#9a6700','#0550ae','#8250df','#0e7490','#59636e',
-            '#6e7781','#d1242f','#1a7f37','#b35900','#0969da','#8250df','#0e7490','#1f2328',
+            '#1f2328','#d32f2f','#2e7d32','#f9a825','#1565c0','#8250df','#00838f','#6e7781',
+            '#6e7781','#e53935','#43a047','#f57f17','#1e88e5','#ab47bc','#00acc1','#37474f',
         ];
         // 256-color: generate the 6x6x6 cube + grayscale
         const ANSI256 = [...ANSI16];
@@ -1776,7 +1777,12 @@
                     cell = line.getCell(x, cell);
                     if (!cell) break;
                     const ch = cell.getChars();
-                    if (!ch) continue;
+                    // Skip only width-0 cells (2nd cell of wide chars like CJK)
+                    if (!ch) {
+                        const w = cell.getWidth ? cell.getWidth() : 1;
+                        if (w === 0) continue;
+                        // width > 0 but empty chars = space
+                    }
                     let style = '';
                     try {
                         const fgMode = cell.getFgColorMode();
@@ -1831,12 +1837,15 @@
                         if (style) { html += '<span style="' + style + '">'; spanOpen = true; }
                         curStyle = style;
                     }
-                    if (ch === '<') html += '&lt;';
-                    else if (ch === '>') html += '&gt;';
-                    else if (ch === '&') html += '&amp;';
-                    else html += ch;
+                    const outCh = ch || ' ';
+                    if (outCh === '<') html += '&lt;';
+                    else if (outCh === '>') html += '&gt;';
+                    else if (outCh === '&') html += '&amp;';
+                    else html += outCh;
                 }
                 if (spanOpen) html += '</span>';
+                // Trim trailing spaces that extend to terminal width
+                html = html.replace(/( |&nbsp;)+(<\/span>)?$/, '$2');
                 return { text, html: html.length > 0 ? html : escText(text) };
             } catch(e) {
                 console.warn('bufferLineToHtml error:', e);
