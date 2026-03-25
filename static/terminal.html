@@ -560,7 +560,7 @@
             background: #007aff;
             color: #fff;
             border-bottom-right-radius: 4px;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
             white-space: pre-wrap;
             word-break: break-word;
         }
@@ -569,20 +569,41 @@
             background: #f6f8fa;
             color: #1f2328;
             border-bottom-left-radius: 4px;
-            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', 'Menlo', monospace, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
             font-size: 12.5px;
+            line-height: 1.55;
             white-space: pre;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
-            scrollbar-width: none;
+            scrollbar-width: thin;
+            scrollbar-color: #c8c8cc transparent;
             border: 1px solid #d1d9e0;
             border-radius: 12px;
             border-bottom-left-radius: 4px;
             padding: 10px 14px;
             tab-size: 4;
+            -moz-tab-size: 4;
+            word-break: keep-all;
         }
         .chat-msg-row.received .chat-bubble::-webkit-scrollbar {
-            display: none;
+            height: 4px;
+        }
+        .chat-msg-row.received .chat-bubble::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .chat-msg-row.received .chat-bubble::-webkit-scrollbar-thumb {
+            background: #c8c8cc;
+            border-radius: 4px;
+        }
+        .chat-msg-row.received .chat-bubble::-webkit-scrollbar-thumb:hover {
+            background: #a8a8ad;
+        }
+        /* Rich content styles inside received bubbles */
+        .chat-msg-row.received .chat-bubble span[style*="font-weight"] {
+            letter-spacing: 0.01em;
+        }
+        .chat-msg-row.received .chat-bubble span[style*="text-decoration"] {
+            text-underline-offset: 2px;
         }
         /* Typing indicator */
         .chat-typing-wrap {
@@ -1636,7 +1657,25 @@
                                        + ((fgVal >> 8) & 0xff).toString(16).padStart(2,'0')
                                        + (fgVal & 0xff).toString(16).padStart(2,'0');
                         }
-                        if (color) style += 'color:' + color + ';';
+                        // Adjust colors that are too light on #f6f8fa background
+                        if (color) {
+                            color = adjustForLightBg(color);
+                            style += 'color:' + color + ';';
+                        }
+                        // Background color support
+                        const bgMode = cell.getBgColorMode ? cell.getBgColorMode() : 0;
+                        const bgVal = cell.getBgColor ? cell.getBgColor() : 0;
+                        let bgColor = null;
+                        if (bgMode === 1) {
+                            if (bgVal < 16) bgColor = ANSI16[bgVal];
+                            else if (bgVal < 256) bgColor = ANSI256[bgVal];
+                        } else if (bgMode === 2) {
+                            if (bgVal < 256) bgColor = ANSI256[bgVal];
+                            else bgColor = '#' + ((bgVal >> 16) & 0xff).toString(16).padStart(2,'0') + ((bgVal >> 8) & 0xff).toString(16).padStart(2,'0') + (bgVal & 0xff).toString(16).padStart(2,'0');
+                        } else if (bgMode === 3) {
+                            bgColor = '#' + ((bgVal >> 16) & 0xff).toString(16).padStart(2,'0') + ((bgVal >> 8) & 0xff).toString(16).padStart(2,'0') + (bgVal & 0xff).toString(16).padStart(2,'0');
+                        }
+                        if (bgColor) style += 'background:' + bgColor + ';padding:0 2px;border-radius:2px;';
                         // isBold/isItalic/isUnderline return 0 or 1, not boolean
                         if (cell.isBold && cell.isBold() === 1) style += 'font-weight:700;';
                         if (cell.isItalic && cell.isItalic() === 1) style += 'font-style:italic;';
@@ -1662,6 +1701,32 @@
 
         function escText(s) {
             return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        // Adjust foreground colors that are too light to read on #f6f8fa background
+        function adjustForLightBg(hex) {
+            if (!hex || hex.length < 4) return hex;
+            let r, g, b;
+            if (hex.length === 4) { // #RGB
+                r = parseInt(hex[1]+hex[1], 16);
+                g = parseInt(hex[2]+hex[2], 16);
+                b = parseInt(hex[3]+hex[3], 16);
+            } else {
+                r = parseInt(hex.slice(1,3), 16);
+                g = parseInt(hex.slice(3,5), 16);
+                b = parseInt(hex.slice(5,7), 16);
+            }
+            // Relative luminance (sRGB)
+            const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+            // If too bright (luminance > 0.75), darken to readable
+            if (lum > 0.75) {
+                const factor = 0.55;
+                r = Math.round(r * factor);
+                g = Math.round(g * factor);
+                b = Math.round(b * factor);
+                return '#' + [r,g,b].map(v => v.toString(16).padStart(2,'0')).join('');
+            }
+            return hex;
         }
 
         // Snapshot xterm buffer → parse into sent/received bubbles with rich HTML
@@ -1777,7 +1842,9 @@
             bubble.className = 'chat-bubble';
             // received: use rich HTML with colors; sent: plain text
             if (type === 'received' && html) {
-                bubble.innerHTML = html;
+                // Trim trailing empty lines from HTML for cleaner bubble
+                let cleanHtml = html.replace(/(\n\s*)+$/, '');
+                bubble.innerHTML = cleanHtml;
             } else {
                 bubble.textContent = text;
             }
