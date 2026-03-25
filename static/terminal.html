@@ -1220,75 +1220,42 @@
                 fitAddon.fit();
                 const viewport = terminalContainer.querySelector('.xterm-viewport');
                 if (viewport) {
-                    // Prevent browser auto-scroll-anchoring
                     viewport.style.overflowAnchor = 'none';
 
-                    // Save native scroll methods before overriding
-                    const proto = Object.getPrototypeOf(viewport);
-                    const desc = Object.getOwnPropertyDescriptor(proto, 'scrollTop')
-                              || Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
-                    const nativeSet = desc.set;
-                    const nativeGet = desc.get;
-                    const nativeScrollTo = viewport.scrollTo.bind(viewport);
-                    const nativeScroll = viewport.scroll.bind(viewport);
-                    const nativeScrollBy = viewport.scrollBy.bind(viewport);
+                    // Simple scroll-lock: track whether user has scrolled up
+                    function isAtBottom() {
+                        return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30;
+                    }
 
-                    // Block scrollTop setter when locked
-                    Object.defineProperty(viewport, 'scrollTop', {
-                        get() { return nativeGet.call(this); },
-                        set(val) {
-                            if (!followMode) return;  // block
-                            nativeSet.call(this, val);
-                        },
-                        configurable: true,
-                    });
-
-                    // Block scrollTo/scroll/scrollBy when locked
-                    viewport.scrollTo = function(...args) {
-                        if (!followMode) return;
-                        nativeScrollTo(...args);
-                    };
-                    viewport.scroll = function(...args) {
-                        if (!followMode) return;
-                        nativeScrollTo(...args);
-                    };
-                    viewport.scrollBy = function(...args) {
-                        if (!followMode) return;
-                        nativeScrollBy(...args);
-                    };
-
-                    // User scroll: wheel/touch
-                    let scrollTimeout = null;
+                    // Scroll up → lock (stop auto-scroll), scroll to bottom → unlock
                     viewport.addEventListener('wheel', (e) => {
-                        if (followMode) {
-                            // followMode on: let native scroll handle it (our setter allows it)
-                            // But if user scrolls UP, lock immediately
-                            if (e.deltaY < 0) {
-                                followMode = false;
-                                // Manually apply this up-scroll since native may conflict
-                                const current = nativeGet.call(viewport);
-                                nativeSet.call(viewport, current + e.deltaY * (e.deltaMode === 1 ? 20 : 1));
-                            }
-                            // deltaY > 0 (scroll down) in followMode: native handles it, do nothing extra
-                        } else {
-                            // Locked mode: native scroll is blocked, apply delta manually
-                            const current = nativeGet.call(viewport);
-                            nativeSet.call(viewport, current + e.deltaY * (e.deltaMode === 1 ? 20 : 1));
-                        }
-                        // After scrolling stops, check if back at bottom
-                        clearTimeout(scrollTimeout);
-                        scrollTimeout = setTimeout(() => {
-                            const atBottom = viewport.scrollHeight - nativeGet.call(viewport) - viewport.clientHeight < 30;
-                            followMode = atBottom;
+                        if (e.deltaY < 0) followMode = false;
+                        setTimeout(() => {
+                            if (isAtBottom()) followMode = true;
                             updateScrollbar();
-                        }, 150);
+                        }, 50);
+                    }, { passive: true });
+
+                    viewport.addEventListener('touchmove', () => {
+                        setTimeout(() => {
+                            followMode = isAtBottom();
+                            updateScrollbar();
+                        }, 100);
                     }, { passive: true });
 
                     viewport.addEventListener('scroll', () => { updateScrollbar(); });
 
+                    // Auto-scroll to bottom on new content when following
+                    currentTerm.onWriteParsed(() => {
+                        if (followMode) {
+                            viewport.scrollTop = viewport.scrollHeight;
+                        }
+                        updateScrollbar();
+                    });
+
                     // Initial: scroll to bottom
                     followMode = true;
-                    nativeSet.call(viewport, viewport.scrollHeight);
+                    viewport.scrollTop = viewport.scrollHeight;
                     updateScrollbar();
                 }
             }, 50);
@@ -1422,10 +1389,17 @@
             termInputField.style.height = 'auto';
             termInputField.style.height = Math.min(termInputField.scrollHeight, 120) + 'px';
         }
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.matchMedia('(max-width: 768px)').matches;
         termInputField.addEventListener('input', autoResizeInput);
         termInputSend.addEventListener('click', sendInput);
         termInputField.addEventListener('keydown', (e) => {
-            // Enter = newline (default), no preventDefault
+            // Desktop: Enter = send, Shift+Enter = newline
+            // Mobile: Enter = newline (default), Send button = send
+            if (e.key === 'Enter' && !isMobile && !e.shiftKey) {
+                e.preventDefault();
+                sendInput();
+                return;
+            }
             if (e.key === 'Tab') {
                 e.preventDefault();
                 if (currentWs && currentWs.readyState === WebSocket.OPEN) {
