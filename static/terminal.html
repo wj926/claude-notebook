@@ -1621,26 +1621,9 @@
             if (Date.now() - idleSince < IDLE_THRESHOLD) return;
 
             // Idle timeout reached — output is done!
-            // Collect all lines from pendingOutputStart, trim only blank/prompt at edges
+            // Collect ALL lines from pendingOutputStart — no filtering
             let outputFrom = pendingOutputStart;
             let outputTo = totalLines;
-
-            // Skip leading lines that are just the echoed command (starts with ❯)
-            for (let i = outputFrom; i < outputTo; i++) {
-                const line = buf.getLine(i);
-                if (!line) continue;
-                const text = line.translateToString(true);
-                if (/^❯/.test(text)) { outputFrom = i + 1; continue; }
-                break;
-            }
-            // Trim trailing bare prompt line only (exactly ❯ with nothing else)
-            for (let i = outputTo - 1; i >= outputFrom; i--) {
-                const line = buf.getLine(i);
-                if (!line) continue;
-                const text = line.translateToString(true);
-                if (!text.trim() || /^❯\s*$/.test(text)) { outputTo = i; continue; }
-                break;
-            }
 
             const htmlParts = [];
             for (let j = outputFrom; j < outputTo; j++) {
