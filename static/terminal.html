@@ -605,14 +605,6 @@
         .chat-msg-row.received .chat-bubble span[style*="text-decoration"] {
             text-underline-offset: 2px;
         }
-        /* Live bubble — subtle indicator while content is streaming */
-        .chat-msg-row.received .chat-bubble.live {
-            min-height: 20px;
-            min-width: 40px;
-        }
-        .chat-msg-row.received .chat-bubble.live:empty {
-            background: #f0f0f0;
-        }
         /* Typing indicator */
         .chat-typing-wrap {
             padding: 4px 16px 0;
@@ -1280,10 +1272,7 @@
             chatToggleBtn.classList.remove('active');
             chatView.classList.remove('active');
             chatMessages.innerHTML = '';
-            chatProcessedLine = 0;
-            liveRecvBubble = null;
-            liveRecvStartLine = 0;
-            liveMode = 'idle';
+            chatLastLine = 0;
             lastChatTimeStr = '';
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             chatTyping.classList.remove('active');
@@ -1539,15 +1528,11 @@
             }
         });
 
-        // ===== iMessage Chat — live bubble architecture =====
+        // ===== iMessage Chat — fully independent fixed overlay =====
+        let chatLastLine = 0;
         let chatSnapshotTimer = null;
         let lastChatTimeStr = '';
         let chatTypingTimeout = null;
-        // Live bubble state
-        let chatProcessedLine = 0;     // lines already frozen into bubbles
-        let liveRecvBubble = null;      // current live received bubble DOM element
-        let liveRecvStartLine = 0;      // buffer line where live bubble content starts
-        let liveMode = 'idle';          // 'idle' | 'receiving'
 
         function openChat() {
             chatMode = true;
@@ -1557,15 +1542,12 @@
             chatContactStatus.textContent = 'Connected';
             chatContactStatus.classList.remove('typing');
             chatMessages.innerHTML = '';
-            chatProcessedLine = 0;
-            liveRecvBubble = null;
-            liveRecvStartLine = 0;
-            liveMode = 'idle';
+            chatLastLine = 0;
             lastChatTimeStr = '';
             chatView.classList.add('active');
             snapshotBuffer();
             scrollChatToBottom();
-            chatSnapshotTimer = setInterval(snapshotBuffer, 250);
+            chatSnapshotTimer = setInterval(snapshotBuffer, 500);
             chatInputField.focus();
         }
 
@@ -1576,8 +1558,6 @@
             chatView.classList.remove('fullscreen');
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             chatTyping.classList.remove('active');
-            liveRecvBubble = null;
-            liveMode = 'idle';
             if (fitAddon) setTimeout(() => fitAddon.fit(), 50);
         }
 
@@ -1588,16 +1568,10 @@
         });
 
         // Chat input
-        let chatSentFromInput = false; // Flag to skip echo prompt in snapshotBuffer
         function chatSendInput() {
             const text = chatInputField.value;
             if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
-            // Freeze current live bubble if any
-            freezeLiveBubble();
             addChatBubble('sent', text);
-            // Mark idle so next output creates a new live received bubble
-            liveMode = 'idle';
-            chatSentFromInput = true;
             scrollChatToBottom();
             currentWs.send(JSON.stringify(["stdin", text]));
             setTimeout(() => {
@@ -1755,122 +1729,86 @@
             return hex;
         }
 
-        // Snapshot xterm buffer → live bubble approach
-        // - Scans new lines from chatProcessedLine
-        // - Prompt lines (❯) → freeze live bubble, create sent bubble, advance chatProcessedLine
-        // - Non-prompt lines → feed into live received bubble (re-read from liveRecvStartLine each tick)
+        // Snapshot xterm buffer → parse into sent/received bubbles with rich HTML
         function snapshotBuffer() {
             if (!currentTerm) return;
             const buf = currentTerm.buffer.active;
             const totalLines = buf.baseY + buf.cursorY + 1;
-            if (totalLines <= chatProcessedLine && liveMode !== 'receiving') return;
+            if (totalLines <= chatLastLine) return;
 
-            // Phase 1: scan new unprocessed lines for prompts (stop when we enter receiving mode)
-            for (let i = chatProcessedLine; i < totalLines; i++) {
-                const line = buf.getLine(i);
-                if (!line) continue;
-                const text = line.translateToString(true);
+            // Read lines as both plain text (for classification) and HTML (for display)
+            const lines = [];
+            for (let i = chatLastLine; i < totalLines; i++) {
+                const { text, html } = bufferLineToHtml(buf, i);
+                lines.push({ text, html });
+            }
+            chatLastLine = totalLines;
+            if (lines.length === 0) return;
+
+            const blocks = [];
+            let mode = 'received';
+            let sentTexts = [], sentHtmls = [];
+            let recvTexts = [], recvHtmls = [];
+
+            function flushSent() {
+                const t = sentTexts.join('\n').replace(/\s+$/, '');
+                const h = sentHtmls.join('\n');
+                if (t) blocks.push({ type: 'sent', text: t, html: h });
+                sentTexts = []; sentHtmls = [];
+            }
+            function flushReceived() {
+                const t = recvTexts.join('\n').replace(/\s+$/, '');
+                const h = recvHtmls.join('\n');
+                if (t) blocks.push({ type: 'received', text: t, html: h });
+                recvTexts = []; recvHtmls = [];
+            }
+
+            for (const { text, html } of lines) {
                 const promptMatch = text.match(/^❯ (.+)/);
-
                 if (promptMatch) {
-                    // Freeze any existing live received bubble
-                    freezeLiveBubble();
-                    if (chatSentFromInput) {
-                        // Skip echo prompt — already added via chatSendInput
-                        chatSentFromInput = false;
+                    if (mode === 'sent') flushSent();
+                    else flushReceived();
+                    mode = 'sent';
+                    // Strip prompt from display
+                    const cmdStart = html.indexOf('❯');
+                    const cmdHtml = cmdStart >= 0 ? html.substring(cmdStart + 1).replace(/^\s+/, '') : escText(promptMatch[1]);
+                    sentTexts.push(promptMatch[1]);
+                    sentHtmls.push(cmdHtml);
+                    continue;
+                }
+
+                if (mode === 'sent') {
+                    const isBlank = text.trim() === '';
+                    const hasLeadingSpace = /^\s/.test(text) && !isBlank;
+                    if (isBlank || hasLeadingSpace) {
+                        flushSent();
+                        mode = 'received';
+                        recvTexts.push(text);
+                        recvHtmls.push(html);
                     } else {
-                        addChatBubble('sent', promptMatch[1]);
+                        sentTexts.push(text);
+                        sentHtmls.push(html);
                     }
-                    chatProcessedLine = i + 1;
-                    liveMode = 'idle';
-                } else if (/^❯\s*$/.test(text)) {
-                    // Bare prompt (waiting for input) — skip it, advance processed line
-                    chatProcessedLine = i + 1;
-                } else if (liveMode === 'idle') {
-                    // First line after a sent (or initial) → start live receiving
-                    liveRecvStartLine = i;
-                    liveMode = 'receiving';
-                    // Create the live bubble element
-                    liveRecvBubble = createLiveBubble();
-                    break; // Phase 2 will handle content from here
+                } else {
+                    recvTexts.push(text);
+                    recvHtmls.push(html);
                 }
             }
+            if (mode === 'sent') flushSent();
+            else flushReceived();
 
-            // Phase 2: if currently receiving, re-read from liveRecvStartLine to totalLines and update live bubble
-            if (liveMode === 'receiving' && liveRecvBubble) {
-                const htmlParts = [];
-                let hasContent = false;
-                let foundPromptAt = -1;
-                for (let i = liveRecvStartLine; i < totalLines; i++) {
-                    const line = buf.getLine(i);
-                    if (!line) continue;
-                    const text = line.translateToString(true);
-                    // Check if this line is a prompt (with or without command) → stop here
-                    if (/^❯/.test(text)) {
-                        foundPromptAt = i;
-                        break;
-                    }
-                    const { html } = bufferLineToHtml(buf, i);
-                    htmlParts.push(html);
-                    if (text.trim()) hasContent = true;
+            if (blocks.length === 0) return;
+
+            const hasReceived = blocks.some(b => b.type === 'received');
+            if (hasReceived) showTyping();
+
+            setTimeout(() => {
+                if (hasReceived) hideTyping();
+                for (const block of blocks) {
+                    if (block.text) addChatBubble(block.type, block.text, block.html);
                 }
-
-                // Update live bubble content
-                if (hasContent) {
-                    const newHtml = htmlParts.join('\n').replace(/(\n\s*)+$/, '');
-                    liveRecvBubble.innerHTML = newHtml;
-                    hideTyping();
-                }
-
-                // If a prompt was found, freeze and process it
-                if (foundPromptAt >= 0) {
-                    freezeLiveBubble();
-                    const promptLine = buf.getLine(foundPromptAt);
-                    const promptText = promptLine ? promptLine.translateToString(true) : '';
-                    const promptCmd = promptText.match(/^❯ (.+)/);
-                    if (promptCmd) {
-                        if (chatSentFromInput) {
-                            chatSentFromInput = false;
-                        } else {
-                            addChatBubble('sent', promptCmd[1]);
-                        }
-                    }
-                    chatProcessedLine = foundPromptAt + 1;
-                    liveMode = 'idle';
-                    hideTyping();
-                }
-
                 scrollChatToBottom();
-            }
-        }
-
-        function freezeLiveBubble() {
-            if (liveRecvBubble) {
-                // Mark as frozen (no longer updated)
-                liveRecvBubble.classList.remove('live');
-                liveRecvBubble = null;
-            }
-            hideTyping();
-        }
-
-        function createLiveBubble() {
-            const now = new Date();
-            const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-            if (timeStr !== lastChatTimeStr) {
-                const sep = document.createElement('div');
-                sep.className = 'chat-time-sep';
-                sep.textContent = timeStr;
-                chatMessages.appendChild(sep);
-                lastChatTimeStr = timeStr;
-            }
-            const row = document.createElement('div');
-            row.className = 'chat-msg-row received';
-            const bubble = document.createElement('div');
-            bubble.className = 'chat-bubble live';
-            row.appendChild(bubble);
-            chatMessages.appendChild(row);
-            scrollChatToBottom();
-            return bubble;
+            }, hasReceived ? 200 : 0);
         }
 
         function showTyping() {
@@ -1878,6 +1816,8 @@
             chatContactStatus.textContent = 'typing...';
             chatContactStatus.classList.add('typing');
             scrollChatToBottom();
+            if (chatTypingTimeout) clearTimeout(chatTypingTimeout);
+            chatTypingTimeout = setTimeout(hideTyping, 3000);
         }
         function hideTyping() {
             chatTyping.classList.remove('active');
@@ -1886,7 +1826,7 @@
             if (chatTypingTimeout) { clearTimeout(chatTypingTimeout); chatTypingTimeout = null; }
         }
 
-        function addChatBubble(type, text) {
+        function addChatBubble(type, text, html) {
             const now = new Date();
             const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
             if (timeStr !== lastChatTimeStr) {
@@ -1900,10 +1840,16 @@
             row.className = 'chat-msg-row ' + type;
             const bubble = document.createElement('div');
             bubble.className = 'chat-bubble';
-            bubble.textContent = text;
+            // received: use rich HTML with colors; sent: plain text
+            if (type === 'received' && html) {
+                // Trim trailing empty lines from HTML for cleaner bubble
+                let cleanHtml = html.replace(/(\n\s*)+$/, '');
+                bubble.innerHTML = cleanHtml;
+            } else {
+                bubble.textContent = text;
+            }
             row.appendChild(bubble);
             chatMessages.appendChild(row);
-            scrollChatToBottom();
         }
 
         function scrollChatToBottom() {
