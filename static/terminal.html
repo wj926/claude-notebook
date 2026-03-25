@@ -469,10 +469,8 @@
         .chat-view {
             display: none;
             position: absolute;
-            top: 0;
             left: 0;
             right: 0;
-            bottom: 0;
             flex-direction: column;
             background: var(--bg);
             z-index: 10;
@@ -1157,6 +1155,7 @@
             chatMode = false;
             chatToggleBtn.classList.remove('active');
             chatView.classList.remove('active');
+            chatView.style.top = '';
             chatView.style.bottom = '';
             const typing = chatTyping;
             chatMessages.innerHTML = '';
@@ -1406,6 +1405,8 @@
         function sendInput() {
             const text = termInputField.value;
             if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+            // Show as blue (stdin) bubble in chat view
+            if (chatMode) addChatBubble('stdin', text);
             // Send text first, then \r after a short delay
             // This works with raw-mode programs (Claude CLI, vim, etc.)
             currentWs.send(JSON.stringify(["stdin", text]));
@@ -1453,9 +1454,10 @@
 
         function layoutChatView() {
             if (!chatMode) return;
-            // Position chat-view above the input bar
-            const inputBar = termInputBar;
-            const inputH = inputBar.offsetHeight || 44;
+            // Position chat-view between toolbar and input bar
+            const toolbarH = termToolbar.offsetHeight || 48;
+            const inputH = termInputBar.offsetHeight || 44;
+            chatView.style.top = toolbarH + 'px';
             chatView.style.bottom = inputH + 'px';
         }
 
@@ -1482,6 +1484,7 @@
                 chatSnapshotTimer = setInterval(snapshotBuffer, 500);
             } else {
                 chatView.classList.remove('active');
+                chatView.style.top = '';
                 chatView.style.bottom = '';
                 if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
                 chatTyping.classList.remove('active');
