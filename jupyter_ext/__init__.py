@@ -146,7 +146,15 @@ class WorkspaceViewerHandler(IPythonHandler):
         html = STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
         html = html.replace('href="/style.css"', f'href="{viewer_base}/static/style.css"')
         html = html.replace('src="/app.js"', f'src="{viewer_base}/static/app.js"')
-        inject = f'<script>window.__VIEWER_BASE = "{viewer_base}";</script>'
+        xsrf = self.xsrf_token
+        if isinstance(xsrf, bytes):
+            xsrf = xsrf.decode("utf-8")
+        inject = (
+            f'<script>'
+            f'window.__VIEWER_BASE = "{viewer_base}";'
+            f'window.__XSRF_TOKEN = {json.dumps(xsrf)};'
+            f'</script>'
+        )
         html = html.replace('</head>', inject + '\n</head>')
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.finish(html)

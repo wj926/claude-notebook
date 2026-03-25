@@ -20,7 +20,16 @@
     const previewDownload = document.getElementById('previewDownload');
 
     const BASE = window.__VIEWER_BASE || '';
+    const XSRF = window.__XSRF_TOKEN || '';
     const fetchOpts = { headers: { 'ngrok-skip-browser-warning': '1' }, credentials: 'same-origin' };
+    // For mutating requests (POST/DELETE), include XSRF token
+    function mutFetchOpts(extra) {
+        return {
+            ...extra,
+            credentials: 'same-origin',
+            headers: { 'ngrok-skip-browser-warning': '1', 'X-XSRFToken': XSRF, ...(extra && extra.headers) },
+        };
+    }
     let currentFinderPath = '';
     let currentPreviewPath = '';
 
@@ -226,22 +235,30 @@
     document.addEventListener('click', hideContextMenu);
 
     // === File Actions ===
-    function downloadFile(path) {
-        const url = `${BASE}/api/download?path=${encodeURIComponent(path)}`;
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = '';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+    async function downloadFile(path) {
+        try {
+            const url = `${BASE}/api/download?path=${encodeURIComponent(path)}`;
+            const res = await fetch(url, fetchOpts);
+            if (!res.ok) throw new Error('Download failed');
+            const blob = await res.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = path.split('/').pop();
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(objectUrl);
+        } catch (err) {
+            alert('Download failed: ' + err.message);
+        }
     }
 
     async function deleteItem(item) {
         if (!confirm(`Delete "${item.name}"?`)) return;
         try {
-            const res = await fetch(`${BASE}/api/delete?path=${encodeURIComponent(item.path)}`, {
-                method: 'DELETE', ...fetchOpts,
-            });
+            const res = await fetch(`${BASE}/api/delete?path=${encodeURIComponent(item.path)}`,
+                mutFetchOpts({ method: 'DELETE' }));
             if (!res.ok) throw new Error(await res.text());
             loadFinderGrid(currentFinderPath);
             loadTree(); // refresh sidebar
@@ -263,7 +280,7 @@
         for (const f of files) form.append('file', f, f.name);
         try {
             const url = `${BASE}/api/upload?dir=${encodeURIComponent(targetDir || '')}`;
-            const res = await fetch(url, { method: 'POST', body: form, ...fetchOpts });
+            const res = await fetch(url, mutFetchOpts({ method: 'POST', body: form }));
             if (!res.ok) throw new Error(await res.text());
             loadFinderGrid(currentFinderPath);
             loadTree();
