@@ -42,7 +42,8 @@ html, body {
 }
 
 .sidebar-header {
-    padding: 20px 16px 12px;
+    padding: 0 16px;
+    min-height: 48px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -102,17 +103,22 @@ html, body {
 .sidebar-toggle {
     display: none;
     position: fixed;
-    top: 12px;
-    left: 12px;
+    top: 6px;
+    left: 6px;
     z-index: 1001;
+    width: 36px;
+    height: 36px;
     background: var(--sidebar-bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 20px;
-    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 18px;
+    padding: 0;
     cursor: pointer;
     color: var(--text);
     box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
 }
 
 .sidebar-toggle:hover {
@@ -427,7 +433,7 @@ html, body {
 /* === Mobile Responsive === */
 @media (max-width: 768px) {
     .sidebar-toggle {
-        display: block;
+        display: flex;
     }
 
     .sidebar-close {
@@ -435,7 +441,7 @@ html, body {
     }
 
     .sidebar-header {
-        padding-left: 52px;
+        padding-left: 48px;
     }
 
     .sidebar {
@@ -473,7 +479,7 @@ html, body {
     }
 
     .content {
-        padding: 52px 20px 40px;
+        padding: 48px 20px 40px;
         max-width: 100%;
     }
 

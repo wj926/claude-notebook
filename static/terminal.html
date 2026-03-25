@@ -38,7 +38,7 @@
 
         /* Sidebar */
         .term-sidebar {
-            width: 240px;
+            width: 280px;
             min-width: 200px;
             background: var(--sidebar-bg);
             border-right: 1px solid var(--border);
@@ -47,14 +47,15 @@
             overflow: hidden;
         }
         .term-sidebar-header {
-            padding: 16px;
+            padding: 0 16px;
+            min-height: 48px;
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
         .term-sidebar-header h2 {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -69,7 +70,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 28px;
+            width: 32px;
             height: 28px;
             background: none;
             border: 1px solid var(--border);
@@ -550,7 +551,7 @@
             z-index: 1001;
             width: 36px;
             height: 36px;
-            background: rgba(45,45,45,0.9);
+            background: rgba(45,45,45,0.92);
             border: 1px solid #555;
             border-radius: 8px;
             color: #ccc;
@@ -558,6 +559,7 @@
             cursor: pointer;
             align-items: center;
             justify-content: center;
+            line-height: 1;
         }
         .mobile-overlay {
             display: none;
@@ -589,7 +591,7 @@
                 background: rgba(0,0,0,0.4);
             }
             .term-sidebar-header {
-                padding-left: 52px;
+                padding-left: 48px;
             }
             .term-toolbar {
                 padding-left: 48px;
