@@ -124,7 +124,6 @@ function autoResizeInput() {
 }
 
 // Sidebar toggle
-function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
 function openSidebar() {
     termSidebar.classList.add('open');
     termSidebar.classList.remove('collapsed');
@@ -133,7 +132,7 @@ function openSidebar() {
 function closeSidebar() {
     termSidebar.classList.remove('open');
     mobileOverlay.classList.remove('active');
-    if (!isMobile()) {
+    if (!isMobile) {
         termSidebar.classList.add('collapsed');
     }
 }
@@ -1205,7 +1204,7 @@ document.querySelectorAll('input, textarea').forEach(el => {
 
 // Sidebar toggle
 mobileToggle.addEventListener('click', () => {
-    if (isMobile()) {
+    if (isMobile) {
         termSidebar.classList.contains('open') ? closeSidebar() : openSidebar();
     } else {
         termSidebar.classList.contains('collapsed') ? openSidebar() : closeSidebar();
