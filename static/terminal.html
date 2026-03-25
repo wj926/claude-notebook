@@ -1668,11 +1668,6 @@
 
                 const htmlParts = [];
                 for (let j = sentTextFoundLine; j < outputTo; j++) {
-                    const line = buf.getLine(j);
-                    if (!line) continue;
-                    const text = line.translateToString(true);
-                    // Skip lines that contain the user's sent text
-                    if (text.includes(sentText)) continue;
                     const { html } = bufferLineToHtml(buf, j);
                     htmlParts.push(html);
                 }
