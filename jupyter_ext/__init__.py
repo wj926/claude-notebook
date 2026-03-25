@@ -12,6 +12,10 @@ from notebook.base.handlers import IPythonHandler
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
+# ---------------------------------------------------------------------------
+# Utility functions
+# ---------------------------------------------------------------------------
+
 def is_safe_path(workspace: Path, requested_path: str) -> bool:
     try:
         resolved = (workspace / requested_path).resolve()
@@ -37,7 +41,7 @@ def get_git_remote_url(dir_path: Path):
         if https_match:
             return https_match.group(1)
         return None
-    except Exception:
+    except (OSError, ValueError):
         return None
 
 
@@ -94,7 +98,7 @@ def _read_names():
             _write_names(migrated)
             return migrated
         return data
-    except Exception:
+    except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
@@ -102,11 +106,84 @@ def _write_names(data):
     NAMES_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-class TerminalNamesHandler(IPythonHandler):
+TERMINAL_UPLOAD_DIR = "uploads"  # Fixed subdir for terminal uploads
+
+
+def unique_filepath(dest: Path, fname: str) -> Path:
+    """Return a non-colliding path: name.ext -> name (1).ext -> name (2).ext ..."""
+    fpath = dest / fname
+    if not fpath.exists():
+        return fpath
+    stem = Path(fname).stem
+    suffix = Path(fname).suffix
+    i = 1
+    while True:
+        candidate = dest / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+IMAGE_CONTENT_TYPES = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon', '.bmp': 'image/bmp',
+}
+
+
+# ---------------------------------------------------------------------------
+# Base handler with shared helpers
+# ---------------------------------------------------------------------------
+
+class BaseHandler(IPythonHandler):
+    """Common helpers shared by all Workspace Viewer handlers."""
+
+    def json_response(self, data):
+        """Serialize *data* as JSON and finish the response."""
+        self.set_header("Content-Type", "application/json; charset=utf-8")
+        self.finish(json.dumps(data, ensure_ascii=False))
+
+    def get_xsrf_string(self):
+        """Return the XSRF token as a str (decoded from bytes if needed)."""
+        xsrf = self.xsrf_token
+        if isinstance(xsrf, bytes):
+            xsrf = xsrf.decode("utf-8")
+        return xsrf
+
+    def inject_script(self, html, **variables):
+        """Inject a ``<script>`` block that sets ``window.__KEY = "value"`` for each kwarg."""
+        parts = "".join(
+            f'window.{key} = {json.dumps(value)};' for key, value in variables.items()
+        )
+        inject = f'<script>{parts}</script>'
+        return html.replace('</head>', inject + '\n</head>')
+
+    def get_workspace(self):
+        """Return the workspace root ``Path``."""
+        return self.settings["workspace_viewer_path"]
+
+    def validate_path(self, file_path):
+        """Validate *file_path* against the workspace and return the resolved ``Path``.
+
+        Raises ``tornado.web.HTTPError`` on invalid or missing paths.
+        """
+        workspace = self.get_workspace()
+        if not file_path:
+            raise web.HTTPError(400, "path required")
+        if not is_safe_path(workspace, file_path):
+            raise web.HTTPError(400, "Invalid path: %s" % file_path)
+        full_path = (workspace / file_path).resolve()
+        return full_path
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
+class TerminalNamesHandler(BaseHandler):
     @web.authenticated
     def get(self):
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps(_read_names(), ensure_ascii=False))
+        self.json_response(_read_names())
 
     @web.authenticated
     def put(self):
@@ -119,8 +196,7 @@ class TerminalNamesHandler(IPythonHandler):
         names = _read_names()
         names[str(slot)] = {"display_name": display_name, "command": command}
         _write_names(names)
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({"ok": True}))
+        self.json_response({"ok": True})
 
     @web.authenticated
     def delete(self):
@@ -134,11 +210,10 @@ class TerminalNamesHandler(IPythonHandler):
         for i, key in enumerate(sorted(names.keys(), key=lambda x: int(x)), 1):
             reindexed[str(i)] = names[key]
         _write_names(reindexed)
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({"ok": True}))
+        self.json_response({"ok": True})
 
 
-class WorkspaceViewerHandler(IPythonHandler):
+class WorkspaceViewerHandler(BaseHandler):
     @web.authenticated
     def get(self):
         base_url = self.settings.get("base_url", "/")
@@ -146,43 +221,37 @@ class WorkspaceViewerHandler(IPythonHandler):
         html = STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
         html = html.replace('href="/style.css"', f'href="{viewer_base}/static/style.css"')
         html = html.replace('src="/app.js"', f'src="{viewer_base}/static/app.js"')
-        xsrf = self.xsrf_token
-        if isinstance(xsrf, bytes):
-            xsrf = xsrf.decode("utf-8")
-        inject = (
-            f'<script>'
-            f'window.__VIEWER_BASE = "{viewer_base}";'
-            f'window.__XSRF_TOKEN = {json.dumps(xsrf)};'
-            f'</script>'
+        xsrf = self.get_xsrf_string()
+        html = self.inject_script(
+            html,
+            __VIEWER_BASE=viewer_base,
+            __XSRF_TOKEN=xsrf,
         )
-        html = html.replace('</head>', inject + '\n</head>')
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.finish(html)
 
 
-class WorkspaceTerminalHandler(IPythonHandler):
+class WorkspaceTerminalHandler(BaseHandler):
     @web.authenticated
     def get(self):
         base_url = self.settings.get("base_url", "/")
         viewer_base = ujoin(base_url, "workspace-viewer")
         html = STATIC_DIR.joinpath("terminal.html").read_text(encoding="utf-8")
-        xsrf = self.xsrf_token
-        if isinstance(xsrf, bytes):
-            xsrf = xsrf.decode("utf-8")
-        inject = (
-            f'<script>'
-            f'window.__VIEWER_BASE = "{viewer_base}";'
-            f'window.__JUPYTER_BASE = "{base_url.rstrip("/")}";'
-            f'window.__XSRF_TOKEN = {json.dumps(xsrf)};'
-            f'</script>'
+        html = html.replace('href="terminal.css"', f'href="{viewer_base}/static/terminal.css"')
+        html = html.replace('src="terminal.js"', f'src="{viewer_base}/static/terminal.js"')
+        xsrf = self.get_xsrf_string()
+        html = self.inject_script(
+            html,
+            __VIEWER_BASE=viewer_base,
+            __JUPYTER_BASE=base_url.rstrip("/"),
+            __XSRF_TOKEN=xsrf,
         )
-        html = html.replace('</head>', inject + '\n</head>')
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.finish(html)
 
 
-class WorkspaceStaticHandler(IPythonHandler):
+class WorkspaceStaticHandler(BaseHandler):
     @web.authenticated
     def get(self, filename):
         filepath = STATIC_DIR / filename
@@ -198,10 +267,10 @@ class WorkspaceStaticHandler(IPythonHandler):
         self.finish(filepath.read_bytes())
 
 
-class WorkspaceTreeHandler(IPythonHandler):
+class WorkspaceTreeHandler(BaseHandler):
     @web.authenticated
     def get(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         sub = self.get_argument("path", "")
         if sub and not is_safe_path(workspace, sub):
             raise web.HTTPError(400, "Invalid path")
@@ -209,28 +278,16 @@ class WorkspaceTreeHandler(IPythonHandler):
         if not target.is_dir():
             raise web.HTTPError(404, "Directory not found")
         tree = get_directory_listing(target, workspace)
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps(tree, ensure_ascii=False))
+        self.json_response(tree)
 
 
-IMAGE_CONTENT_TYPES = {
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-    '.ico': 'image/x-icon', '.bmp': 'image/bmp',
-}
-
-
-class WorkspaceFileHandler(IPythonHandler):
+class WorkspaceFileHandler(BaseHandler):
     @web.authenticated
     def get(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         file_path = self.get_argument("path", None)
         raw_mode = self.get_argument("raw", None)
-        if not file_path:
-            raise web.HTTPError(400, "path required")
-        if not is_safe_path(workspace, file_path):
-            raise web.HTTPError(400, "Invalid path: %s" % file_path)
-        full_path = (workspace / file_path).resolve()
+        full_path = self.validate_path(file_path)
         if not full_path.is_file():
             raise web.HTTPError(404, "Not found: %s" % file_path)
         ext = full_path.suffix.lower()
@@ -262,38 +319,19 @@ class WorkspaceFileHandler(IPythonHandler):
         except Exception as e:
             raise web.HTTPError(500, str(e))
 
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({
+        self.json_response({
             "path": file_path,
             "name": full_path.name,
             "content": content,
             "extension": ext,
-        }, ensure_ascii=False))
+        })
 
 
-TERMINAL_UPLOAD_DIR = "uploads"  # Fixed subdir for terminal uploads
-
-
-def unique_filepath(dest: Path, fname: str) -> Path:
-    """Return a non-colliding path: name.ext → name (1).ext → name (2).ext ..."""
-    fpath = dest / fname
-    if not fpath.exists():
-        return fpath
-    stem = Path(fname).stem
-    suffix = Path(fname).suffix
-    i = 1
-    while True:
-        candidate = dest / f"{stem} ({i}){suffix}"
-        if not candidate.exists():
-            return candidate
-        i += 1
-
-
-class WorkspaceUploadHandler(IPythonHandler):
+class WorkspaceUploadHandler(BaseHandler):
     """Upload files to workspace."""
     @web.authenticated
     def post(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         target_dir = self.get_argument("dir", "")
         if target_dir and not is_safe_path(workspace, target_dir):
             raise web.HTTPError(400, "Invalid dir")
@@ -319,21 +357,16 @@ class WorkspaceUploadHandler(IPythonHandler):
                 fpath = unique_filepath(file_dest, rel.name)
                 fpath.write_bytes(f["body"])
                 uploaded.append(str(fpath.relative_to(workspace)))
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({"uploaded": uploaded}, ensure_ascii=False))
+        self.json_response({"uploaded": uploaded})
 
 
-class WorkspaceDeleteHandler(IPythonHandler):
+class WorkspaceDeleteHandler(BaseHandler):
     """Delete a file or empty folder."""
     @web.authenticated
     def delete(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         file_path = self.get_argument("path", None)
-        if not file_path:
-            raise web.HTTPError(400, "path required")
-        if not is_safe_path(workspace, file_path):
-            raise web.HTTPError(400, "Invalid path")
-        full_path = (workspace / file_path).resolve()
+        full_path = self.validate_path(file_path)
         if not full_path.exists():
             raise web.HTTPError(404, "Not found")
         # Safety: don't delete workspace root or .agent
@@ -344,15 +377,14 @@ class WorkspaceDeleteHandler(IPythonHandler):
             shutil.rmtree(full_path)
         else:
             full_path.unlink()
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({"deleted": file_path}))
+        self.json_response({"deleted": file_path})
 
 
-class WorkspaceDownloadHandler(IPythonHandler):
+class WorkspaceDownloadHandler(BaseHandler):
     """Download a file as attachment."""
     @web.authenticated
     def get(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         file_path = self.get_argument("path", None)
         if not file_path or not is_safe_path(workspace, file_path):
             raise web.HTTPError(400, "Invalid path")
@@ -367,11 +399,11 @@ class WorkspaceDownloadHandler(IPythonHandler):
         self.finish()
 
 
-class TerminalUploadHandler(IPythonHandler):
+class TerminalUploadHandler(BaseHandler):
     """Upload file to fixed dir for terminal use, return metadata."""
     @web.authenticated
     def post(self):
-        workspace = self.settings["workspace_viewer_path"]
+        workspace = self.get_workspace()
         upload_dir = workspace / TERMINAL_UPLOAD_DIR
         upload_dir.mkdir(exist_ok=True)
         results = []
@@ -389,9 +421,12 @@ class TerminalUploadHandler(IPythonHandler):
                     "size": len(f["body"]),
                     "content_type": f.get("content_type", "application/octet-stream"),
                 })
-        self.set_header("Content-Type", "application/json; charset=utf-8")
-        self.finish(json.dumps({"files": results}, ensure_ascii=False))
+        self.json_response({"files": results})
 
+
+# ---------------------------------------------------------------------------
+# Extension entry points
+# ---------------------------------------------------------------------------
 
 def _jupyter_server_extension_paths():
     return [{"module": "jupyter_ext"}]
