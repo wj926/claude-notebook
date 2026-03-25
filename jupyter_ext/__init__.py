@@ -263,6 +263,103 @@ class WorkspaceFileHandler(IPythonHandler):
         }, ensure_ascii=False))
 
 
+TERMINAL_UPLOAD_DIR = "uploads"  # Fixed subdir for terminal uploads
+
+
+class WorkspaceUploadHandler(IPythonHandler):
+    """Upload files to workspace."""
+    @web.authenticated
+    def post(self):
+        workspace = self.settings["workspace_viewer_path"]
+        target_dir = self.get_argument("dir", "")
+        if target_dir and not is_safe_path(workspace, target_dir):
+            raise web.HTTPError(400, "Invalid dir")
+        dest = (workspace / target_dir).resolve() if target_dir else workspace
+        if not dest.is_dir():
+            raise web.HTTPError(400, "Target is not a directory")
+        uploaded = []
+        for field_name, file_list in self.request.files.items():
+            for f in file_list:
+                fname = Path(f["filename"]).name  # sanitize
+                if not fname:
+                    continue
+                fpath = dest / fname
+                fpath.write_bytes(f["body"])
+                uploaded.append(str(fpath.relative_to(workspace)))
+        self.set_header("Content-Type", "application/json; charset=utf-8")
+        self.finish(json.dumps({"uploaded": uploaded}, ensure_ascii=False))
+
+
+class WorkspaceDeleteHandler(IPythonHandler):
+    """Delete a file or empty folder."""
+    @web.authenticated
+    def delete(self):
+        workspace = self.settings["workspace_viewer_path"]
+        file_path = self.get_argument("path", None)
+        if not file_path:
+            raise web.HTTPError(400, "path required")
+        if not is_safe_path(workspace, file_path):
+            raise web.HTTPError(400, "Invalid path")
+        full_path = (workspace / file_path).resolve()
+        if not full_path.exists():
+            raise web.HTTPError(404, "Not found")
+        # Safety: don't delete workspace root or .agent
+        if full_path == workspace or ".agent" in full_path.parts:
+            raise web.HTTPError(403, "Cannot delete this path")
+        import shutil
+        if full_path.is_dir():
+            shutil.rmtree(full_path)
+        else:
+            full_path.unlink()
+        self.set_header("Content-Type", "application/json; charset=utf-8")
+        self.finish(json.dumps({"deleted": file_path}))
+
+
+class WorkspaceDownloadHandler(IPythonHandler):
+    """Download a file as attachment."""
+    @web.authenticated
+    def get(self):
+        workspace = self.settings["workspace_viewer_path"]
+        file_path = self.get_argument("path", None)
+        if not file_path or not is_safe_path(workspace, file_path):
+            raise web.HTTPError(400, "Invalid path")
+        full_path = (workspace / file_path).resolve()
+        if not full_path.is_file():
+            raise web.HTTPError(404, "Not found")
+        data = full_path.read_bytes()
+        self.set_header("Content-Type", "application/octet-stream")
+        self.set_header("Content-Disposition", f'attachment; filename="{full_path.name}"')
+        self.set_header("Content-Length", str(len(data)))
+        self.write(data)
+        self.finish()
+
+
+class TerminalUploadHandler(IPythonHandler):
+    """Upload file to fixed dir for terminal use, return metadata."""
+    @web.authenticated
+    def post(self):
+        workspace = self.settings["workspace_viewer_path"]
+        upload_dir = workspace / TERMINAL_UPLOAD_DIR
+        upload_dir.mkdir(exist_ok=True)
+        results = []
+        for field_name, file_list in self.request.files.items():
+            for f in file_list:
+                fname = Path(f["filename"]).name
+                if not fname:
+                    continue
+                fpath = upload_dir / fname
+                fpath.write_bytes(f["body"])
+                results.append({
+                    "name": fname,
+                    "path": str(fpath),
+                    "relative": str(fpath.relative_to(workspace)),
+                    "size": len(f["body"]),
+                    "content_type": f.get("content_type", "application/octet-stream"),
+                })
+        self.set_header("Content-Type", "application/json; charset=utf-8")
+        self.finish(json.dumps({"files": results}, ensure_ascii=False))
+
+
 def _jupyter_server_extension_paths():
     return [{"module": "jupyter_ext"}]
 
@@ -320,6 +417,10 @@ def load_jupyter_server_extension(nb_app):
         (ujoin(base_url, r"/workspace-viewer/static/(.+)"), WorkspaceStaticHandler),
         (ujoin(base_url, r"/workspace-viewer/api/tree"), WorkspaceTreeHandler),
         (ujoin(base_url, r"/workspace-viewer/api/file"), WorkspaceFileHandler),
+        (ujoin(base_url, r"/workspace-viewer/api/upload"), WorkspaceUploadHandler),
+        (ujoin(base_url, r"/workspace-viewer/api/delete"), WorkspaceDeleteHandler),
+        (ujoin(base_url, r"/workspace-viewer/api/download"), WorkspaceDownloadHandler),
+        (ujoin(base_url, r"/workspace-viewer/api/terminal-upload"), TerminalUploadHandler),
         (ujoin(base_url, r"/workspace-viewer/api/terminal-names"), TerminalNamesHandler),
     ]
     nb_app.web_app.add_handlers(".*$", handlers)
