@@ -279,8 +279,9 @@ def load_jupyter_server_extension(nb_app):
 
     base_url = nb_app.web_app.settings["base_url"]
     handlers = [
-        (ujoin(base_url, r"/workspace-viewer"), WorkspaceViewerHandler),
+        (ujoin(base_url, r"/workspace-viewer"), WorkspaceTerminalHandler),
         (ujoin(base_url, r"/workspace-viewer/terminal"), WorkspaceTerminalHandler),
+        (ujoin(base_url, r"/workspace-viewer/files"), WorkspaceViewerHandler),
         (ujoin(base_url, r"/workspace-viewer/static/(.+)"), WorkspaceStaticHandler),
         (ujoin(base_url, r"/workspace-viewer/api/tree"), WorkspaceTreeHandler),
         (ujoin(base_url, r"/workspace-viewer/api/file"), WorkspaceFileHandler),

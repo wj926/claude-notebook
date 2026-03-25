@@ -180,7 +180,7 @@
             flex: 1;
             display: flex;
             flex-direction: column;
-            background: #1e1e1e;
+            background: var(--bg);
             position: relative;
             min-width: 0;
             min-height: 0;
@@ -189,16 +189,16 @@
             display: flex;
             align-items: center;
             padding: 8px 12px;
-            background: #2d2d2d;
-            border-bottom: 1px solid #404040;
+            background: var(--sidebar-bg);
+            border-bottom: 1px solid var(--border);
             gap: 8px;
             min-height: 48px;
             flex-shrink: 0;
         }
         .term-toolbar-title {
-            font-size: 12px;
-            color: #ccc;
-            font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -217,11 +217,11 @@
         .term-toolbar-spacer { flex: 1; }
         .term-toolbar-btn {
             background: none;
-            border: 1px solid #555;
-            color: #ccc;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
             font-size: 11px;
             padding: 4px 6px;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             transition: all 0.15s;
             flex-shrink: 0;
@@ -231,8 +231,9 @@
             justify-content: center;
         }
         .term-toolbar-btn:hover {
-            background: #555;
+            background: var(--text);
             color: #fff;
+            border-color: var(--text);
         }
         .term-toolbar-btn svg {
             width: 16px;
@@ -309,8 +310,8 @@
             display: flex;
             align-items: flex-end;
             padding: 8px 10px;
-            background: #2d2d2d;
-            border-top: 1px solid #404040;
+            background: var(--sidebar-bg);
+            border-top: 1px solid var(--border);
             gap: 6px;
             flex-shrink: 0;
             min-height: 44px;
@@ -320,10 +321,10 @@
         }
         .term-input-field {
             flex: 1;
-            background: #1e1e1e;
-            border: 1px solid #555;
+            background: var(--bg);
+            border: 1px solid var(--border);
             border-radius: 6px;
-            color: #d4d4d4;
+            color: var(--text);
             font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
             font-size: 14px;
             padding: 8px 12px;
@@ -360,7 +361,7 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #666;
+            color: var(--text-secondary);
             font-size: 14px;
             text-align: center;
             padding: 20px;
@@ -464,34 +465,76 @@
             background: #258fb5;
         }
 
-        /* Chat view — iMessage style with terminal-faithful content */
+        /* Chat view — full iMessage redesign */
         .chat-view {
             display: none;
             flex: 1;
             flex-direction: column;
             min-height: 0;
+            background: var(--bg);
         }
         .chat-view.active {
             display: flex;
         }
+        /* Chat header — contact bar like iMessage */
+        .chat-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 16px;
+            background: var(--sidebar-bg);
+            border-bottom: 1px solid var(--border);
+            min-height: 48px;
+        }
+        .chat-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .chat-contact-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .chat-contact-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .chat-contact-status {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .chat-contact-status.typing {
+            color: var(--accent);
+        }
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 16px 12px;
+            padding: 12px 16px;
             display: flex;
             flex-direction: column;
             gap: 2px;
-            background: #000;
+            background: var(--bg);
             -webkit-overflow-scrolling: touch;
             scrollbar-width: thin;
-            scrollbar-color: #333 transparent;
+            scrollbar-color: var(--border) transparent;
         }
         .chat-time-sep {
             text-align: center;
             font-size: 11px;
-            color: #666;
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            padding: 8px 0 4px;
+            color: var(--text-secondary);
+            padding: 12px 0 6px;
         }
         .chat-bubble {
             padding: 8px 12px;
@@ -506,27 +549,56 @@
         .chat-bubble.stdin {
             align-self: flex-end;
             max-width: 85%;
-            background: #248bf5;
+            background: var(--accent);
             color: #fff;
             border-bottom-right-radius: 4px;
-            margin-top: 6px;
+            margin-top: 4px;
         }
         .chat-bubble.stdout {
             align-self: flex-start;
             max-width: 100%;
-            background: #1c1c1e;
-            color: #d4d4d4;
+            background: var(--sidebar-bg);
+            color: var(--text);
             border-bottom-left-radius: 4px;
-            border: 1px solid #2a2a2c;
+            border: 1px solid var(--border);
+        }
+        /* Typing indicator */
+        .chat-typing {
+            align-self: flex-start;
+            padding: 10px 16px;
+            background: var(--sidebar-bg);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            border-bottom-left-radius: 4px;
+            display: none;
+            gap: 4px;
+            align-items: center;
+            margin-top: 4px;
+        }
+        .chat-typing.active {
+            display: flex;
+        }
+        .chat-typing-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--text-secondary);
+            animation: typingBounce 1.4s infinite ease-in-out;
+        }
+        .chat-typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .chat-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typingBounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+            30% { transform: translateY(-4px); opacity: 1; }
         }
         .chat-toggle-btn {
             background: none;
-            border: 1px solid #555;
-            color: #ccc;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
             font-size: 14px;
             width: 28px;
             height: 28px;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
             transition: all 0.15s;
             display: flex;
@@ -535,8 +607,9 @@
             flex-shrink: 0;
         }
         .chat-toggle-btn:hover {
-            background: #555;
+            background: var(--text);
             color: #fff;
+            border-color: var(--text);
         }
         .chat-toggle-btn.active {
             background: var(--accent);
@@ -553,15 +626,16 @@
             z-index: 1001;
             width: 36px;
             height: 36px;
-            background: rgba(45,45,45,0.92);
-            border: 1px solid #555;
+            background: var(--sidebar-bg);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            color: #ccc;
+            color: var(--text);
             font-size: 18px;
             cursor: pointer;
             align-items: center;
             justify-content: center;
             line-height: 1;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.08);
         }
         .mobile-overlay {
             display: none;
@@ -655,7 +729,7 @@
                 <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle chat view"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 1A1.5 1.5 0 0 0 1 2.5v9A1.5 1.5 0 0 0 2.5 13h1.09l2.35 1.96a.5.5 0 0 0 .64 0L8.93 13h4.57A1.5 1.5 0 0 0 15 11.5v-9A1.5 1.5 0 0 0 13.5 1h-11zM4 5.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0 3a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1-.5-.5z"/></svg></button>
                 <button class="term-toolbar-btn" id="renameBtn" title="Config"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.421 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.421-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg></button>
                 <button class="term-toolbar-btn" id="reconnectBtn" title="Reconnect"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/><path d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A5.501 5.501 0 0 1 13.5 8a.5.5 0 0 1-1 0A4.5 4.5 0 0 0 8 3zM3.5 8a.5.5 0 0 1 1 0 4.5 4.5 0 0 0 7.857 2.818.5.5 0 1 1 .771.636A5.501 5.501 0 0 1 2.5 8z"/></svg></button>
-                <button class="term-toolbar-btn" id="shutdownBtn" title="Shutdown" style="border-color:#e03e3e;color:#e03e3e;"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button>
+                <button class="term-toolbar-btn" id="shutdownBtn" title="Shutdown" style="border-color:var(--danger);color:var(--danger);"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/></svg></button>
             </div>
             <div class="term-body">
                 <div id="terminalContainer" style="display:none;"></div>
@@ -665,7 +739,20 @@
                 </div>
             </div>
             <div class="chat-view" id="chatView">
-                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-header">
+                    <div class="chat-avatar" id="chatAvatar">T</div>
+                    <div class="chat-contact-info">
+                        <div class="chat-contact-name" id="chatContactName">Terminal</div>
+                        <div class="chat-contact-status" id="chatContactStatus">Connected</div>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <div class="chat-typing" id="chatTyping">
+                        <div class="chat-typing-dot"></div>
+                        <div class="chat-typing-dot"></div>
+                        <div class="chat-typing-dot"></div>
+                    </div>
+                </div>
             </div>
             <div class="term-input-bar hidden" id="termInputBar">
                 <textarea class="term-input-field" id="termInputField" placeholder="Type command..." rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
@@ -710,6 +797,10 @@
         const configCmdInput = document.getElementById('configCmdInput');
         const configCancelBtn = document.getElementById('configCancelBtn');
         const configConfirmBtn = document.getElementById('configConfirmBtn');
+        const chatAvatar = document.getElementById('chatAvatar');
+        const chatContactName = document.getElementById('chatContactName');
+        const chatContactStatus = document.getElementById('chatContactStatus');
+        const chatTyping = document.getElementById('chatTyping');
 
         let currentTerm = null;
         let currentWs = null;
@@ -794,7 +885,7 @@
 
         // Back button
         backBtn.addEventListener('click', () => {
-            window.location.href = BASE || '/';
+            window.location.href = (BASE || '') + '/files';
         });
 
         // Load terminal list
@@ -873,7 +964,7 @@
         function showConfigModal(termName) {
             const isRename = !!termName;
             modalMode = isRename ? 'rename' : 'create';
-            configModalTitle.textContent = isRename ? 'Rename Terminal' : 'New Terminal';
+            configModalTitle.textContent = isRename ? 'Config Terminal' : 'New Terminal';
             configConfirmBtn.textContent = isRename ? 'Save' : 'Create';
 
             if (isRename) {
@@ -1061,10 +1152,14 @@
             chatMode = false;
             chatToggleBtn.classList.remove('active');
             chatView.classList.remove('active');
+            const typing = chatTyping;
             chatMessages.innerHTML = '';
+            chatMessages.appendChild(typing);
             chatLastLine = 0;
             lastChatTimeStr = '';
+            chatPrevTotalLines = 0;
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
+            chatTyping.classList.remove('active');
 
             termPlaceholder.style.display = 'none';
             termToolbar.style.display = '';
@@ -1344,10 +1439,12 @@
             }
         });
 
-        // === Chat view: xterm buffer snapshot approach ===
-        // Reads directly from xterm's buffer to preserve exactly what the terminal shows.
-        let chatLastLine = 0;  // tracks how far we've read
+        // === Chat view: full iMessage with typing indicator ===
+        let chatLastLine = 0;
         let chatSnapshotTimer = null;
+        let lastChatTimeStr = '';
+        let chatTypingTimeout = null;
+        let chatPrevTotalLines = 0;
 
         chatToggleBtn.addEventListener('click', () => {
             chatMode = !chatMode;
@@ -1356,32 +1453,37 @@
             if (chatMode) {
                 termBody.style.display = 'none';
                 chatView.classList.add('active');
-                // Take initial snapshot of everything in the buffer
+                // Set contact info
+                chatContactName.textContent = currentDisplayName || 'Terminal';
+                chatAvatar.textContent = (currentDisplayName || 'T').charAt(0).toUpperCase();
+                chatContactStatus.textContent = (currentWs && currentWs.readyState === WebSocket.OPEN) ? 'Connected' : 'Disconnected';
+                chatContactStatus.classList.remove('typing');
+                // Reset and snapshot
+                // Keep typing indicator at the end — clear only bubbles before it
+                const typing = chatTyping;
                 chatMessages.innerHTML = '';
+                chatMessages.appendChild(typing);
                 chatLastLine = 0;
                 lastChatTimeStr = '';
+                chatPrevTotalLines = 0;
                 snapshotBuffer();
                 scrollChatToBottom();
-                // Poll for new content every 500ms
-                chatSnapshotTimer = setInterval(() => {
-                    snapshotBuffer();
-                }, 500);
+                chatSnapshotTimer = setInterval(snapshotBuffer, 500);
             } else {
                 termBody.style.display = '';
                 chatView.classList.remove('active');
                 if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
+                chatTyping.classList.remove('active');
                 if (fitAddon) setTimeout(() => fitAddon.fit(), 50);
             }
         });
 
-        // Read lines from xterm buffer and add as chat bubbles
         function snapshotBuffer() {
             if (!currentTerm) return;
             const buf = currentTerm.buffer.active;
             const totalLines = buf.baseY + buf.cursorY + 1;
             if (totalLines <= chatLastLine) return;
 
-            // Gather new lines
             const newLines = [];
             for (let i = chatLastLine; i < totalLines; i++) {
                 const line = buf.getLine(i);
@@ -1389,35 +1491,52 @@
                 newLines.push(line.translateToString(true));
             }
             chatLastLine = totalLines;
-
             if (newLines.length === 0) return;
 
-            // Group lines into a single bubble (stdout)
-            const text = newLines.join('\n');
-            // Trim only trailing whitespace, preserve leading structure
-            const trimmed = text.replace(/\s+$/, '');
-            if (!trimmed) return;
+            const text = newLines.join('\n').replace(/\s+$/, '');
+            if (!text) return;
 
-            addChatBubble('stdout', trimmed);
-            scrollChatToBottom();
+            // Show typing indicator briefly, then show the bubble
+            showTyping();
+            setTimeout(() => {
+                hideTyping();
+                addChatBubble('stdout', text);
+                scrollChatToBottom();
+            }, 200);
+
+            chatPrevTotalLines = totalLines;
         }
 
-        let lastChatTimeStr = '';
+        function showTyping() {
+            chatTyping.classList.add('active');
+            chatContactStatus.textContent = 'typing...';
+            chatContactStatus.classList.add('typing');
+            scrollChatToBottom();
+            if (chatTypingTimeout) clearTimeout(chatTypingTimeout);
+            chatTypingTimeout = setTimeout(hideTyping, 3000);
+        }
+
+        function hideTyping() {
+            chatTyping.classList.remove('active');
+            chatContactStatus.textContent = 'Connected';
+            chatContactStatus.classList.remove('typing');
+            if (chatTypingTimeout) { clearTimeout(chatTypingTimeout); chatTypingTimeout = null; }
+        }
+
         function addChatBubble(type, text) {
             const now = new Date();
             const timeStr = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-            // Show time separator if minute changed
             if (timeStr !== lastChatTimeStr) {
                 const sep = document.createElement('div');
                 sep.className = 'chat-time-sep';
                 sep.textContent = timeStr;
-                chatMessages.appendChild(sep);
+                chatMessages.insertBefore(sep, chatTyping);
                 lastChatTimeStr = timeStr;
             }
             const bubble = document.createElement('div');
             bubble.className = 'chat-bubble ' + type;
             bubble.textContent = text;
-            chatMessages.appendChild(bubble);
+            chatMessages.insertBefore(bubble, chatTyping);
         }
 
         function scrollChatToBottom() {
