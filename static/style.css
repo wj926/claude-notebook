@@ -47,7 +47,7 @@ html, body {
 }
 
 .sidebar-header {
-    padding: 0 16px;
+    padding: 0 16px 0 48px;
     min-height: 48px;
     border-bottom: 1px solid var(--border);
     display: flex;
@@ -104,9 +104,9 @@ html, body {
     color: var(--text);
 }
 
-/* Hamburger toggle — hidden on desktop */
+/* Hamburger toggle */
 .sidebar-toggle {
-    display: none;
+    display: flex;
     position: fixed;
     top: 6px;
     left: 6px;
@@ -124,10 +124,19 @@ html, body {
     align-items: center;
     justify-content: center;
     line-height: 1;
+    transition: left 0.25s ease;
 }
 
 .sidebar-toggle:hover {
     background: var(--sidebar-hover);
+}
+
+/* Desktop sidebar collapse */
+.sidebar.collapsed {
+    display: none;
+}
+.sidebar.collapsed + .divider {
+    display: none;
 }
 
 /* Overlay behind sidebar on mobile */
@@ -854,16 +863,8 @@ tr:first-child .csv-row-actions {
 
 /* === Mobile Responsive === */
 @media (max-width: 768px) {
-    .sidebar-toggle {
-        display: flex;
-    }
-
     .sidebar-close {
         display: block;
-    }
-
-    .sidebar-header {
-        padding-left: 48px;
     }
 
     .sidebar {
