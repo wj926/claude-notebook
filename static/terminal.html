@@ -1852,21 +1852,24 @@
         setInterval(updateScrollbar, 200);
 
         // iOS keyboard fix: pin layout to visual viewport
+        function pinBodyScroll() {
+            window.scrollTo(0, 0);
+            document.documentElement.scrollTop = 0;
+            // Restore terminal scroll to bottom after layout shift
+            if (currentTerm) {
+                const vp = terminalContainer.querySelector('.xterm-viewport');
+                if (vp) setTimeout(() => { vp.scrollTop = vp.scrollHeight; }, 50);
+            }
+            // Restore chat scroll to bottom
+            if (chatMode) setTimeout(scrollChatToBottom, 50);
+        }
         if (window.visualViewport) {
             const vv = window.visualViewport;
-            const onVVChange = () => {
-                // Scroll body back to 0 to prevent toolbar from being pushed off
-                window.scrollTo(0, 0);
-                document.documentElement.scrollTop = 0;
-            };
-            vv.addEventListener('resize', onVVChange);
-            vv.addEventListener('scroll', onVVChange);
+            vv.addEventListener('resize', pinBodyScroll);
+            vv.addEventListener('scroll', pinBodyScroll);
         }
-        // Prevent iOS from scrolling focused input to center
         document.querySelectorAll('input, textarea').forEach(el => {
-            el.addEventListener('focus', () => {
-                setTimeout(() => window.scrollTo(0, 0), 300);
-            });
+            el.addEventListener('focus', () => setTimeout(pinBodyScroll, 300));
         });
 
         // Init
