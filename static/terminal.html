@@ -1519,15 +1519,22 @@
             }
         });
 
-        // ===== iMessage Chat — deferred output (show after prompt) =====
+        // ===== iMessage Chat =====
+        // History: snapshotBuffer reads past terminal output as static HTML bubbles
+        // Live: user sends text → typing indicator → detect response complete → show bubble
+        //
+        // Two-phase detection:
+        //   Phase 1 (finding): search buffer for user's sent text
+        //   Phase 2 (waiting): watch content hash until stable for 3s → capture response
         let chatLastLine = 0;
         let chatSnapshotTimer = null;
         let lastChatTimeStr = '';
-        // Deferred output state
-        let waitingForOutput = false;
-        let sentText = '';              // the text user sent (to find in buffer)
-        let sentTextFoundLine = -1;     // buffer line where sent text was found
-        let phase = 'idle';            // 'idle' | 'finding' | 'waiting'
+        let sentText = '';
+        let sentTextFoundLine = -1;
+        let phase = 'idle';  // 'idle' | 'finding' | 'waiting'
+        let contentHash = '';
+        let idleSince = 0;
+        const IDLE_MS = 3000;
 
         function openChat() {
             chatMode = true;
@@ -1539,15 +1546,12 @@
             chatMessages.innerHTML = '';
             chatLastLine = 0;
             lastChatTimeStr = '';
-            waitingForOutput = false;
             phase = 'idle';
             chatView.classList.add('active');
-            // Load existing history as static bubbles
             snapshotBuffer();
             scrollChatToBottom();
-            // Keep polling for new history (only when not waiting for output)
             chatSnapshotTimer = setInterval(() => {
-                if (!waitingForOutput) snapshotBuffer();
+                if (phase === 'idle') snapshotBuffer();
             }, 500);
             chatInputField.focus();
         }
@@ -1559,135 +1563,103 @@
             chatView.classList.remove('fullscreen');
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             hideTyping();
-            waitingForOutput = false;
             phase = 'idle';
             if (fitAddon) setTimeout(() => fitAddon.fit(), 50);
         }
 
         chatToggleBtn.addEventListener('click', () => { chatMode ? closeChat() : openChat(); });
         chatBackBtn.addEventListener('click', closeChat);
-        chatExpandBtn.addEventListener('click', () => {
-            chatView.classList.toggle('fullscreen');
-        });
+        chatExpandBtn.addEventListener('click', () => { chatView.classList.toggle('fullscreen'); });
 
-        // Chat input — show typing indicator, wait for output to complete
+        // Send user input → start two-phase detection
         function chatSendInput() {
             const text = chatInputField.value;
             if (!text || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+            // Stop history polling, switch to output detection
             if (chatSnapshotTimer) { clearInterval(chatSnapshotTimer); chatSnapshotTimer = null; }
             addChatBubble('sent', text);
             showTyping();
-            // Save sent text for buffer detection
             sentText = text.trim();
             sentTextFoundLine = -1;
-            phase = 'finding'; // Phase 1: find our text in the buffer
-            waitingForOutput = true;
-            lastContentHash = '';
+            phase = 'finding';
+            contentHash = '';
             idleSince = 0;
             scrollChatToBottom();
-            // Send command
             currentWs.send(JSON.stringify(["stdin", text]));
             setTimeout(() => {
-                if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                if (currentWs && currentWs.readyState === WebSocket.OPEN)
                     currentWs.send(JSON.stringify(["stdin", "\r"]));
-                }
             }, 50);
             chatInputField.value = '';
             chatAutoResize();
-            // Start polling
-            chatSnapshotTimer = setInterval(pollOutputComplete, 300);
+            chatSnapshotTimer = setInterval(pollOutput, 300);
         }
 
-        // Two-phase output detection:
-        // Phase 1 (finding): search buffer for the sent text → confirms input was received
-        // Phase 2 (waiting): watch for content to stop changing → response is done
-        let lastContentHash = '';
-        let idleSince = 0;
-        const IDLE_THRESHOLD = 3000;
-
-        function pollOutputComplete() {
-            if (!currentTerm || !waitingForOutput) return;
+        function pollOutput() {
+            if (!currentTerm || phase === 'idle') return;
             const buf = currentTerm.buffer.active;
             const totalLines = buf.baseY + buf.cursorY + 1;
 
-            // === Phase 1: Find the sent text in the buffer ===
+            // Phase 1: find the user's sent text in the buffer (search backwards)
             if (phase === 'finding') {
-                for (let i = totalLines - 1; i >= Math.max(0, totalLines - 50); i--) {
+                const searchFrom = Math.max(0, totalLines - 50);
+                for (let i = totalLines - 1; i >= searchFrom; i--) {
                     const line = buf.getLine(i);
-                    if (!line) continue;
-                    const text = line.translateToString(true);
-                    if (text.includes(sentText)) {
+                    if (line && line.translateToString(true).includes(sentText)) {
                         sentTextFoundLine = i;
                         phase = 'waiting';
-                        lastContentHash = '';
+                        contentHash = '';
                         idleSince = 0;
                         return;
                     }
                 }
-                // Not found yet — keep looking (timeout after 15s)
+                // Timeout after 15s
                 if (!idleSince) idleSince = Date.now();
-                if (Date.now() - idleSince > 15000) {
-                    // Give up
-                    hideTyping();
-                    waitingForOutput = false;
-                    phase = 'idle';
-                    resumeHistoryPolling();
-                }
+                if (Date.now() - idleSince > 15000) { finishOutput(buf, totalLines); }
                 return;
             }
 
-            // === Phase 2: Wait for content to stop changing ===
+            // Phase 2: wait for content to stop changing (3s stable)
             if (phase === 'waiting') {
-                // Hash the visible content to detect any change
                 let h = '';
-                const start = Math.max(buf.baseY, sentTextFoundLine);
-                for (let i = start; i < totalLines; i++) {
+                for (let i = sentTextFoundLine; i < totalLines; i++) {
                     const line = buf.getLine(i);
                     if (line) h += line.translateToString(false) + '|';
                 }
-
-                if (h !== lastContentHash) {
-                    lastContentHash = h;
+                if (h !== contentHash) {
+                    contentHash = h;
                     idleSince = Date.now();
                     return;
                 }
-
-                if (!idleSince) { idleSince = Date.now(); return; }
-                if (Date.now() - idleSince < IDLE_THRESHOLD) return;
-
-                // Content stable for 3s — output is done!
-                // Capture all lines after the sent text, skipping lines containing sentText
-                let outputTo = totalLines;
-
-                // Trim trailing blank lines
-                for (let i = outputTo - 1; i >= sentTextFoundLine; i--) {
-                    const line = buf.getLine(i);
-                    if (line && line.translateToString(true).trim()) break;
-                    outputTo = i;
-                }
-
-                const htmlParts = [];
-                for (let j = sentTextFoundLine; j < outputTo; j++) {
-                    const { html } = bufferLineToHtml(buf, j);
-                    htmlParts.push(html);
-                }
-                const outputHtml = htmlParts.join('\n').replace(/(\n\s*)+$/, '');
-                hideTyping();
-                if (outputHtml.trim()) {
-                    addChatBubble('received', '', outputHtml);
-                }
-                scrollChatToBottom();
-                chatLastLine = totalLines;
-                waitingForOutput = false;
-                phase = 'idle';
-                resumeHistoryPolling();
+                if (Date.now() - idleSince < IDLE_MS) return;
+                finishOutput(buf, totalLines);
             }
         }
 
-        function resumeHistoryPolling() {
+        function finishOutput(buf, totalLines) {
+            // Trim trailing blank lines
+            let outputTo = totalLines;
+            for (let i = outputTo - 1; i >= sentTextFoundLine; i--) {
+                const line = buf.getLine(i);
+                if (line && line.translateToString(true).trim()) break;
+                outputTo = i;
+            }
+            // Collect HTML from sentTextFoundLine to outputTo
+            const htmlParts = [];
+            for (let j = Math.max(0, sentTextFoundLine); j < outputTo; j++) {
+                const { html } = bufferLineToHtml(buf, j);
+                htmlParts.push(html);
+            }
+            const outputHtml = htmlParts.join('\n').replace(/(\n\s*)+$/, '');
+            hideTyping();
+            if (outputHtml.trim()) addChatBubble('received', '', outputHtml);
+            scrollChatToBottom();
+            chatLastLine = totalLines;
+            phase = 'idle';
+            // Resume history polling
             if (chatSnapshotTimer) clearInterval(chatSnapshotTimer);
             chatSnapshotTimer = setInterval(() => {
-                if (!waitingForOutput) snapshotBuffer();
+                if (phase === 'idle') snapshotBuffer();
             }, 500);
         }
         function chatAutoResize() {
