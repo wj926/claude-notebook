@@ -1595,14 +1595,14 @@
             }
 
             for (const line of newLines) {
-                // Check for ❯ prompt anywhere in line
-                const promptMatch = line.match(/^(.*?)❯\s?(.*)/);
+                // Prompt: ❯ must be at line start (col 0), followed by a space
+                // This prevents matching ❯ inside response text like "  ❯로 시작하는"
+                const promptMatch = line.match(/^❯ (.+)/);
                 if (promptMatch) {
                     if (mode === 'sent') flushSent();
                     else flushReceived();
                     mode = 'sent';
-                    const cmd = promptMatch[2];
-                    if (cmd) sentLines.push(cmd);
+                    sentLines.push(promptMatch[1]);
                     continue;
                 }
 
