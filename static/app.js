@@ -18,6 +18,8 @@
     const previewBreadcrumb = document.getElementById('previewBreadcrumb');
     const previewClose = document.getElementById('previewClose');
     const previewDownload = document.getElementById('previewDownload');
+    const previewEdit = document.getElementById('previewEdit');
+    const previewSave = document.getElementById('previewSave');
 
     const BASE = window.__VIEWER_BASE || '';
     const XSRF = window.__XSRF_TOKEN || '';
@@ -32,6 +34,8 @@
     }
     let currentFinderPath = '';
     let currentPreviewPath = '';
+    let isEditing = false;
+    let currentFileData = null; // { path, content, extension }
 
     // === Mobile sidebar ===
     function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
@@ -360,21 +364,114 @@
     });
 
     // === Preview Overlay ===
+    const EDITABLE_EXTS = ['.md', '.markdown', '.csv', '.txt', '.py', '.js', '.json', '.yaml', '.yml', '.html', '.css', '.sh', '.toml', '.cfg', '.ini', '.xml'];
+    const CSV_EXTS = ['.csv'];
+    const MD_EXTS = ['.md', '.markdown'];
+
     function openPreview(path) {
         currentPreviewPath = path;
+        isEditing = false;
+        currentFileData = null;
         previewOverlay.classList.add('active');
         finder.style.display = 'none';
+        previewEdit.style.display = 'none';
+        previewSave.style.display = 'none';
         loadPreviewContent(path);
     }
 
     function closePreviewFn() {
+        if (isEditing && !confirm('Discard unsaved changes?')) return;
         previewOverlay.classList.remove('active');
         finder.style.display = '';
         previewBody.innerHTML = '';
         currentPreviewPath = '';
+        isEditing = false;
+        currentFileData = null;
+        previewEdit.style.display = 'none';
+        previewSave.style.display = 'none';
+        previewEdit.classList.remove('active');
     }
     previewClose.addEventListener('click', closePreviewFn);
     previewDownload.addEventListener('click', () => { if (currentPreviewPath) downloadFile(currentPreviewPath); });
+
+    // Edit toggle
+    previewEdit.addEventListener('click', () => {
+        if (!currentFileData) return;
+        if (isEditing) {
+            // Switch back to preview
+            isEditing = false;
+            previewEdit.classList.remove('active');
+            previewSave.style.display = 'none';
+            renderPreviewMode(currentFileData);
+        } else {
+            // Switch to edit
+            isEditing = true;
+            previewEdit.classList.add('active');
+            previewSave.style.display = '';
+            renderEditMode(currentFileData);
+        }
+    });
+
+    // Save
+    previewSave.addEventListener('click', async () => {
+        if (!currentFileData) return;
+        let content;
+        const ext = currentFileData.extension;
+        if (CSV_EXTS.includes(ext)) {
+            content = csvTableToString();
+        } else {
+            const ta = previewBody.querySelector('.edit-textarea');
+            if (!ta) return;
+            content = ta.value;
+        }
+        try {
+            const res = await fetch(`${BASE}/api/save`, mutFetchOpts({
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
+                body: JSON.stringify({ path: currentFileData.path, content }),
+            }));
+            if (!res.ok) throw new Error(await res.text());
+            currentFileData.content = content;
+            isEditing = false;
+            previewEdit.classList.remove('active');
+            previewSave.style.display = 'none';
+            renderPreviewMode(currentFileData);
+        } catch (err) {
+            alert('Save failed: ' + err.message);
+        }
+    });
+
+    function renderPreviewMode(data) {
+        if (CSV_EXTS.includes(data.extension)) {
+            renderCsvViewer(data.content);
+        } else if (MD_EXTS.includes(data.extension) && typeof marked !== 'undefined') {
+            previewBody.innerHTML = `<div class="markdown-body">${marked.parse(data.content)}</div>`;
+            if (typeof hljs !== 'undefined') {
+                previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+            }
+        } else {
+            previewBody.innerHTML = `<pre class="file-raw">${escHtml(data.content)}</pre>`;
+        }
+    }
+
+    function renderEditMode(data) {
+        if (CSV_EXTS.includes(data.extension)) {
+            renderCsvEditor(data.content);
+        } else {
+            previewBody.innerHTML = `<textarea class="edit-textarea" spellcheck="false">${escHtml(data.content)}</textarea>`;
+            const ta = previewBody.querySelector('.edit-textarea');
+            ta.focus();
+            // Tab key support
+            ta.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const start = ta.selectionStart;
+                    ta.value = ta.value.substring(0, start) + '    ' + ta.value.substring(ta.selectionEnd);
+                    ta.selectionStart = ta.selectionEnd = start + 4;
+                }
+            });
+        }
+    }
 
     async function loadPreviewContent(path) {
         try {
@@ -383,6 +480,7 @@
             previewBreadcrumb.innerHTML = parts.map((p) => `<span>${escHtml(p)}</span>`).join(' / ');
 
             if (IMAGE_EXTS.includes(ext)) {
+                previewEdit.style.display = 'none';
                 const imgUrl = `${BASE}/api/file?path=${encodeURIComponent(path)}`;
                 const imgRes = await fetch(imgUrl, fetchOpts);
                 if (!imgRes.ok) throw new Error('Image load failed');
@@ -395,19 +493,229 @@
             const res = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            const isMarkdown = ['.md', '.markdown'].includes(data.extension);
+            currentFileData = data;
 
-            if (isMarkdown && typeof marked !== 'undefined') {
-                previewBody.innerHTML = `<div class="markdown-body">${marked.parse(data.content)}</div>`;
-                if (typeof hljs !== 'undefined') {
-                    previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
-                }
+            // Show edit button for editable files
+            if (EDITABLE_EXTS.includes(data.extension)) {
+                previewEdit.style.display = '';
             } else {
-                previewBody.innerHTML = `<pre class="file-raw">${escHtml(data.content)}</pre>`;
+                previewEdit.style.display = 'none';
             }
+
+            renderPreviewMode(data);
         } catch (err) {
             previewBody.innerHTML = `<p style="padding:20px;color:var(--text-secondary);">Error: ${escHtml(err.message)}</p>`;
         }
+    }
+
+    // === CSV Parser & Serializer (vanilla JS, RFC 4180) ===
+    function parseCsv(text) {
+        const rows = [];
+        let i = 0;
+        const len = text.length;
+        while (i < len) {
+            const row = [];
+            while (i < len) {
+                let val = '';
+                if (text[i] === '"') {
+                    i++; // skip opening quote
+                    while (i < len) {
+                        if (text[i] === '"') {
+                            if (i + 1 < len && text[i + 1] === '"') { val += '"'; i += 2; }
+                            else { i++; break; }
+                        } else { val += text[i]; i++; }
+                    }
+                } else {
+                    while (i < len && text[i] !== ',' && text[i] !== '\n' && text[i] !== '\r') { val += text[i]; i++; }
+                }
+                row.push(val);
+                if (i < len && text[i] === ',') { i++; }
+                else break;
+            }
+            if (i < len && text[i] === '\r') i++;
+            if (i < len && text[i] === '\n') i++;
+            if (row.length > 1 || row[0] !== '' || i < len) rows.push(row);
+        }
+        return rows;
+    }
+
+    function csvStringify(rows) {
+        return rows.map(row => row.map(cell => {
+            if (cell.includes(',') || cell.includes('"') || cell.includes('\n')) {
+                return '"' + cell.replace(/"/g, '""') + '"';
+            }
+            return cell;
+        }).join(',')).join('\n');
+    }
+
+    // === CSV Viewer (read-only with sort, filter, color) ===
+    function renderCsvViewer(content) {
+        const rows = parseCsv(content);
+        if (rows.length === 0) { previewBody.innerHTML = '<p style="padding:20px;color:var(--text-secondary);">Empty CSV</p>'; return; }
+
+        const headers = rows[0];
+        let dataRows = rows.slice(1);
+        let sortCol = -1, sortAsc = true;
+        let filters = headers.map(() => '');
+
+        function render() {
+            let filtered = dataRows.filter(row =>
+                headers.every((_, ci) => {
+                    if (!filters[ci]) return true;
+                    return (row[ci] || '').toLowerCase().includes(filters[ci].toLowerCase());
+                })
+            );
+            if (sortCol >= 0) {
+                filtered.sort((a, b) => {
+                    const va = a[sortCol] || '', vb = b[sortCol] || '';
+                    const na = parseFloat(va), nb = parseFloat(vb);
+                    let cmp = (!isNaN(na) && !isNaN(nb)) ? na - nb : va.localeCompare(vb);
+                    return sortAsc ? cmp : -cmp;
+                });
+            }
+
+            let html = '<div class="csv-viewer"><table class="csv-table"><thead><tr>';
+            headers.forEach((h, ci) => {
+                const arrow = sortCol === ci ? (sortAsc ? ' &#9650;' : ' &#9660;') : '';
+                html += `<th data-col="${ci}">${escHtml(h)}${arrow}</th>`;
+            });
+            html += '</tr><tr class="csv-filter-row">';
+            headers.forEach((_, ci) => {
+                html += `<th><input class="csv-filter" data-col="${ci}" placeholder="Filter..." value="${escHtml(filters[ci])}"></th>`;
+            });
+            html += '</tr></thead><tbody>';
+            filtered.forEach((row, ri) => {
+                html += `<tr class="${ri % 2 ? 'even' : 'odd'}">`;
+                headers.forEach((_, ci) => {
+                    const val = row[ci] || '';
+                    const num = parseFloat(val);
+                    const cls = !isNaN(num) && val.trim() !== '' ? ' class="num"' : '';
+                    html += `<td${cls}>${escHtml(val)}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            html += `<div class="csv-status">${filtered.length} of ${dataRows.length} rows</div></div>`;
+
+            previewBody.innerHTML = html;
+
+            // Bind sort
+            previewBody.querySelectorAll('.csv-table thead th[data-col]').forEach(th => {
+                th.style.cursor = 'pointer';
+                th.addEventListener('click', () => {
+                    const ci = parseInt(th.dataset.col);
+                    if (sortCol === ci) sortAsc = !sortAsc;
+                    else { sortCol = ci; sortAsc = true; }
+                    render();
+                });
+            });
+            // Bind filters
+            previewBody.querySelectorAll('.csv-filter').forEach(input => {
+                input.addEventListener('input', () => {
+                    filters[parseInt(input.dataset.col)] = input.value;
+                    render();
+                });
+            });
+        }
+        render();
+    }
+
+    // === CSV Editor (editable table with row/col add/delete) ===
+    let csvEditRows = [];
+
+    function renderCsvEditor(content) {
+        csvEditRows = parseCsv(content);
+        if (csvEditRows.length === 0) csvEditRows = [['']];
+        renderCsvEditTable();
+    }
+
+    function renderCsvEditTable() {
+        const rows = csvEditRows;
+        const maxCols = Math.max(...rows.map(r => r.length));
+        // Normalize column count
+        rows.forEach(r => { while (r.length < maxCols) r.push(''); });
+
+        let html = '<div class="csv-editor"><div class="csv-edit-toolbar">';
+        html += '<button class="csv-edit-btn" id="csvAddRow">+ Row</button>';
+        html += '<button class="csv-edit-btn" id="csvAddCol">+ Column</button>';
+        html += '</div>';
+        html += '<div class="csv-edit-scroll"><table class="csv-table csv-edit-table"><tbody>';
+        rows.forEach((row, ri) => {
+            html += '<tr>';
+            html += `<td class="csv-row-actions"><button class="csv-del-btn" data-row="${ri}" title="Delete row">&times;</button></td>`;
+            row.forEach((cell, ci) => {
+                const isHeader = ri === 0 ? ' csv-header-cell' : '';
+                html += `<td class="csv-cell${isHeader}" contenteditable="true" data-row="${ri}" data-col="${ci}">${escHtml(cell)}</td>`;
+            });
+            html += '</tr>';
+        });
+        // Column delete row
+        html += '<tr class="csv-col-actions-row"><td></td>';
+        for (let ci = 0; ci < maxCols; ci++) {
+            html += `<td class="csv-col-actions"><button class="csv-del-btn" data-col="${ci}" title="Delete column">&times;</button></td>`;
+        }
+        html += '</tr>';
+        html += '</tbody></table></div></div>';
+
+        previewBody.innerHTML = html;
+
+        // Bind cell edits
+        previewBody.querySelectorAll('.csv-cell').forEach(td => {
+            td.addEventListener('blur', () => {
+                const ri = parseInt(td.dataset.row), ci = parseInt(td.dataset.col);
+                csvEditRows[ri][ci] = td.textContent;
+            });
+            td.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    td.blur();
+                }
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const ri = parseInt(td.dataset.row), ci = parseInt(td.dataset.col);
+                    const next = e.shiftKey
+                        ? previewBody.querySelector(`.csv-cell[data-row="${ci > 0 ? ri : ri - 1}"][data-col="${ci > 0 ? ci - 1 : csvEditRows[0].length - 1}"]`)
+                        : previewBody.querySelector(`.csv-cell[data-row="${ci < csvEditRows[0].length - 1 ? ri : ri + 1}"][data-col="${ci < csvEditRows[0].length - 1 ? ci + 1 : 0}"]`);
+                    if (next) { td.blur(); next.focus(); }
+                }
+            });
+        });
+
+        // Add row
+        document.getElementById('csvAddRow').addEventListener('click', () => {
+            csvEditRows.push(new Array(csvEditRows[0].length).fill(''));
+            renderCsvEditTable();
+        });
+        // Add column
+        document.getElementById('csvAddCol').addEventListener('click', () => {
+            csvEditRows.forEach(r => r.push(''));
+            renderCsvEditTable();
+        });
+        // Delete row
+        previewBody.querySelectorAll('.csv-del-btn[data-row]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (csvEditRows.length <= 1) return;
+                csvEditRows.splice(parseInt(btn.dataset.row), 1);
+                renderCsvEditTable();
+            });
+        });
+        // Delete column
+        previewBody.querySelectorAll('.csv-del-btn[data-col]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (csvEditRows[0].length <= 1) return;
+                const ci = parseInt(btn.dataset.col);
+                csvEditRows.forEach(r => r.splice(ci, 1));
+                renderCsvEditTable();
+            });
+        });
+    }
+
+    function csvTableToString() {
+        // Sync any focused cell
+        previewBody.querySelectorAll('.csv-cell').forEach(td => {
+            csvEditRows[parseInt(td.dataset.row)][parseInt(td.dataset.col)] = td.textContent;
+        });
+        return csvStringify(csvEditRows);
     }
 
     // === Init ===

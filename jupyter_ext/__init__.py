@@ -380,6 +380,26 @@ class WorkspaceDeleteHandler(BaseHandler):
         self.json_response({"deleted": file_path})
 
 
+class WorkspaceSaveHandler(BaseHandler):
+    """Save (overwrite) a text file in the workspace."""
+    @web.authenticated
+    def put(self):
+        workspace = self.get_workspace()
+        body = json.loads(self.request.body)
+        file_path = body.get("path")
+        content = body.get("content")
+        if content is None:
+            raise web.HTTPError(400, "content required")
+        full_path = self.validate_path(file_path)
+        if not full_path.is_file():
+            raise web.HTTPError(404, "Not found: %s" % file_path)
+        try:
+            full_path.write_text(content, encoding="utf-8")
+        except OSError as e:
+            raise web.HTTPError(500, "Write error: %s" % str(e))
+        self.json_response({"saved": file_path})
+
+
 class WorkspaceDownloadHandler(BaseHandler):
     """Download a file as attachment."""
     @web.authenticated
@@ -486,6 +506,7 @@ def load_jupyter_server_extension(nb_app):
         (ujoin(base_url, r"/workspace-viewer/api/tree"), WorkspaceTreeHandler),
         (ujoin(base_url, r"/workspace-viewer/api/file"), WorkspaceFileHandler),
         (ujoin(base_url, r"/workspace-viewer/api/upload"), WorkspaceUploadHandler),
+        (ujoin(base_url, r"/workspace-viewer/api/save"), WorkspaceSaveHandler),
         (ujoin(base_url, r"/workspace-viewer/api/delete"), WorkspaceDeleteHandler),
         (ujoin(base_url, r"/workspace-viewer/api/download"), WorkspaceDownloadHandler),
         (ujoin(base_url, r"/workspace-viewer/api/terminal-upload"), TerminalUploadHandler),
