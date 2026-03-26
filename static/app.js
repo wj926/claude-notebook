@@ -871,6 +871,13 @@
             });
             html += '</tr></thead><tbody>';
             filtered.forEach(({ row, origIdx }) => {
+                // Normalize checkbox column values for color rule matching
+                checkboxCols.forEach(ci => {
+                    if (ci < row.length) {
+                        const v = (row[ci] || '').toLowerCase();
+                        if (v !== 'true') row[ci] = 'false';
+                    }
+                });
                 const color = getConditionalColor(row, headers, colorRules);
                 const colorAttr = color && color !== 'none' ? ` data-color="${color}"` : '';
                 html += `<tr${colorAttr} data-orig="${origIdx}">`;
