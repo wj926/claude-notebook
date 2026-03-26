@@ -435,6 +435,7 @@
         previewEdit.style.display = 'none';
         previewSave.style.display = 'none';
         loadPreviewContent(path);
+        updateHash(path);
         const fileName = path.split('/').pop() || path;
         document.title = fileName + ' - Claude Notebook';
     }
