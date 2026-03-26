@@ -1014,18 +1014,14 @@
         html += '<button class="csv-edit-btn" id="csvAddRow">+ Row</button>';
         html += '<button class="csv-edit-btn" id="csvAddCol">+ Column</button>';
         html += '</div>';
-        const totalW = 52 + colWidths.reduce((s, w) => s + w, 0);
+        const totalW = 36 + colWidths.reduce((s, w) => s + w, 0);
         html += `<div class="csv-edit-scroll"><table class="csv-table csv-edit-table" style="width:${totalW}px"><colgroup>`;
-        html += '<col style="width:52px">';
+        html += '<col style="width:36px">';
         for (let ci = 0; ci < maxCols; ci++) { html += `<col style="width:${colWidths[ci]}px">`; }
         html += '</colgroup><tbody>';
         rows.forEach((row, ri) => {
             html += '<tr>';
-            html += `<td class="csv-row-actions">`;
-            html += `<button class="csv-move-btn" data-row="${ri}" data-dir="up" title="Move up"${ri === 0 ? ' disabled' : ''}>&#9650;</button>`;
-            html += `<button class="csv-move-btn" data-row="${ri}" data-dir="down" title="Move down"${ri === rows.length - 1 ? ' disabled' : ''}>&#9660;</button>`;
-            html += `<button class="csv-del-btn" data-row="${ri}" title="Delete row">&times;</button>`;
-            html += `</td>`;
+            html += `<td class="csv-row-actions"><span class="csv-drag-handle csv-row-drag" data-row="${ri}" title="Drag to reorder">&#9776;</span><button class="csv-del-btn" data-row="${ri}" title="Delete row">&times;</button></td>`;
             row.forEach((cell, ci) => {
                 const isHeader = ri === 0 ? ' csv-header-cell' : '';
                 const resizer = ri === 0 ? `<span class="csv-resize-handle" data-col="${ci}"></span>` : '';
@@ -1036,11 +1032,7 @@
         // Column delete row
         html += '<tr class="csv-col-actions-row"><td></td>';
         for (let ci = 0; ci < maxCols; ci++) {
-            html += `<td class="csv-col-actions">`;
-            html += `<button class="csv-move-btn" data-col="${ci}" data-dir="left" title="Move left"${ci === 0 ? ' disabled' : ''}>&#9664;</button>`;
-            html += `<button class="csv-move-btn" data-col="${ci}" data-dir="right" title="Move right"${ci === maxCols - 1 ? ' disabled' : ''}>&#9654;</button>`;
-            html += `<button class="csv-del-btn" data-col="${ci}" title="Delete column">&times;</button>`;
-            html += `</td>`;
+            html += `<td class="csv-col-actions"><span class="csv-drag-handle csv-col-drag" data-col="${ci}" title="Drag to reorder">&#8801;</span><button class="csv-del-btn" data-col="${ci}" title="Delete column">&times;</button></td>`;
         }
         html += '</tr>';
         html += '</tbody></table></div></div>';
@@ -1100,30 +1092,104 @@
                 renderCsvEditTable();
             });
         });
-        // Move row/column
-        previewBody.querySelectorAll('.csv-move-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                // Sync any focused cell first
+        // Drag to reorder rows
+        previewBody.querySelectorAll('.csv-row-drag').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                // Sync cells
                 previewBody.querySelectorAll('.csv-cell').forEach(td => {
                     csvEditRows[parseInt(td.dataset.row)][parseInt(td.dataset.col)] = td.textContent;
                 });
-                const dir = btn.dataset.dir;
-                if (btn.dataset.row !== undefined) {
-                    const ri = parseInt(btn.dataset.row);
-                    if (dir === 'up' && ri > 0) {
-                        [csvEditRows[ri], csvEditRows[ri - 1]] = [csvEditRows[ri - 1], csvEditRows[ri]];
-                    } else if (dir === 'down' && ri < csvEditRows.length - 1) {
-                        [csvEditRows[ri], csvEditRows[ri + 1]] = [csvEditRows[ri + 1], csvEditRows[ri]];
+                const fromIdx = parseInt(handle.dataset.row);
+                const table = previewBody.querySelector('.csv-edit-table');
+                const tbody = table.querySelector('tbody');
+                const allRows = Array.from(tbody.querySelectorAll('tr')).filter(tr => !tr.classList.contains('csv-col-actions-row'));
+                const dragRow = allRows[fromIdx];
+                if (!dragRow) return;
+
+                dragRow.classList.add('csv-dragging');
+                let toIdx = fromIdx;
+
+                const onMove = (me) => {
+                    allRows.forEach((tr, i) => {
+                        tr.classList.remove('csv-drag-over-top', 'csv-drag-over-bottom');
+                        const rect = tr.getBoundingClientRect();
+                        const midY = rect.top + rect.height / 2;
+                        if (me.clientY >= rect.top && me.clientY < rect.bottom) {
+                            toIdx = me.clientY < midY ? i : i;
+                            if (i !== fromIdx) {
+                                tr.classList.add(me.clientY < midY ? 'csv-drag-over-top' : 'csv-drag-over-bottom');
+                            }
+                        }
+                    });
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    allRows.forEach(tr => tr.classList.remove('csv-dragging', 'csv-drag-over-top', 'csv-drag-over-bottom'));
+                    if (toIdx !== fromIdx) {
+                        const [moved] = csvEditRows.splice(fromIdx, 1);
+                        csvEditRows.splice(toIdx, 0, moved);
+                        renderCsvEditTable();
                     }
-                } else if (btn.dataset.col !== undefined) {
-                    const ci = parseInt(btn.dataset.col);
-                    if (dir === 'left' && ci > 0) {
-                        csvEditRows.forEach(r => { [r[ci], r[ci - 1]] = [r[ci - 1], r[ci]]; });
-                    } else if (dir === 'right' && ci < csvEditRows[0].length - 1) {
-                        csvEditRows.forEach(r => { [r[ci], r[ci + 1]] = [r[ci + 1], r[ci]]; });
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        });
+        // Drag to reorder columns
+        previewBody.querySelectorAll('.csv-col-drag').forEach(handle => {
+            handle.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                // Sync cells
+                previewBody.querySelectorAll('.csv-cell').forEach(td => {
+                    csvEditRows[parseInt(td.dataset.row)][parseInt(td.dataset.col)] = td.textContent;
+                });
+                const fromIdx = parseInt(handle.dataset.col);
+                const table = previewBody.querySelector('.csv-edit-table');
+                // Get header cells for column position detection
+                const headerRow = table.querySelector('tbody tr');
+                const headerCells = Array.from(headerRow.querySelectorAll('.csv-cell'));
+                let toIdx = fromIdx;
+
+                // Highlight column
+                const highlightCol = (ci, cls) => {
+                    table.querySelectorAll(`td.csv-cell[data-col="${ci}"]`).forEach(td => td.classList.add(cls));
+                };
+                const clearHighlights = () => {
+                    table.querySelectorAll('.csv-drag-over-left, .csv-drag-over-right, .csv-col-dragging').forEach(td =>
+                        td.classList.remove('csv-drag-over-left', 'csv-drag-over-right', 'csv-col-dragging'));
+                };
+                highlightCol(fromIdx, 'csv-col-dragging');
+
+                const onMove = (me) => {
+                    clearHighlights();
+                    highlightCol(fromIdx, 'csv-col-dragging');
+                    headerCells.forEach((cell, i) => {
+                        const rect = cell.getBoundingClientRect();
+                        if (me.clientX >= rect.left && me.clientX < rect.right) {
+                            toIdx = i;
+                            if (i !== fromIdx) {
+                                const cls = me.clientX < rect.left + rect.width / 2 ? 'csv-drag-over-left' : 'csv-drag-over-right';
+                                highlightCol(i, cls);
+                            }
+                        }
+                    });
+                };
+                const onUp = () => {
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                    clearHighlights();
+                    if (toIdx !== fromIdx) {
+                        csvEditRows.forEach(r => {
+                            const [moved] = r.splice(fromIdx, 1);
+                            r.splice(toIdx, 0, moved);
+                        });
+                        renderCsvEditTable();
                     }
-                }
-                renderCsvEditTable();
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
             });
         });
         // Column resize in editor
@@ -1140,7 +1206,7 @@
                     colWidths[ci] = Math.max(40, startW + me.clientX - startX);
                     const col = previewBody.querySelector(`.csv-edit-table col:nth-child(${ci + 2})`);
                     if (col) col.style.width = colWidths[ci] + 'px';
-                    if (table) table.style.width = (52 + colWidths.reduce((s, w) => s + w, 0)) + 'px';
+                    if (table) table.style.width = (36 + colWidths.reduce((s, w) => s + w, 0)) + 'px';
                 };
                 const onUp = () => {
                     handle.classList.remove('active');
