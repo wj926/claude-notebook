@@ -1122,7 +1122,7 @@
         });
         // Checkbox column toggle
         previewBody.querySelectorAll('.csv-cb-toggle').forEach(btn => {
-            btn.addEventListener('click', async () => {
+            btn.addEventListener('click', () => {
                 const ci = parseInt(btn.dataset.col);
                 // Sync cells first
                 previewBody.querySelectorAll('.csv-cell[contenteditable]').forEach(td => {
@@ -1148,16 +1148,6 @@
                     saveCsvColorRules(filePath, rules);
                 }
                 saveCsvCheckboxCols(filePath, checkboxCols);
-                // Auto-save file so viewer reflects changes
-                const content = csvStringify(csvEditRows);
-                try {
-                    await fetch(`${BASE}/api/save`, mutFetchOpts({
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ path: filePath, content }),
-                    }));
-                    if (currentFileData) currentFileData.content = content;
-                } catch (e) {}
                 renderCsvEditTable();
             });
         });
