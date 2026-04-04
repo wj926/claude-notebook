@@ -9,18 +9,9 @@ A Jupyter Notebook extension that adds a **Notion-like file browser** and **term
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/Harry24k/claude-notebook.git
-cd claude-notebook
-
-# Install dependencies (includes Jupyter Notebook 6 and Tornado)
-pip install -r requirements.txt
-
-# Register the extension
-jupyter serverextension enable --py jupyter_ext --sys-prefix
-
-# Start Jupyter Notebook
-jupyter notebook
+Install Git
+Install Claude Code
+Ask your Claude Code to install "https://github.com/Harry24k/claude-notebook/" from the address below
 ```
 
 Then visit `http://localhost:8888/claude-notebook` in your browser.
