@@ -331,8 +331,16 @@
     }
 
     // === Upload ===
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB per chunk
+    const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
     const CHUNKED_THRESHOLD = 50 * 1024 * 1024; // Use chunked for files > 50 MB
+    const CHUNK_MAX_RETRIES = 3;
+
+    function formatSize(bytes) {
+        if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + ' GB';
+        if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + ' MB';
+        if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
+        return bytes + ' B';
+    }
 
     // Progress bar container (appended to finder)
     const uploadProgressBar = document.createElement('div');
@@ -351,9 +359,9 @@
     const uploadPct = uploadProgressBar.querySelector('.upload-progress-pct');
     const uploadFill = uploadProgressBar.querySelector('.upload-progress-fill');
 
-    function showUploadProgress(filename, pct) {
+    function showUploadProgress(label, pct) {
         uploadProgressBar.style.display = '';
-        uploadLabel.textContent = filename;
+        uploadLabel.textContent = label;
         uploadPct.textContent = pct < 100 ? `${pct}%` : 'Done';
         uploadFill.style.width = pct + '%';
     }
@@ -370,7 +378,20 @@
         finderUpload.value = '';
     });
 
-    async function uploadFileChunked(file, filename, targetDir) {
+    async function sendChunkWithRetry(url, opts, retries) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const res = await fetch(url, opts);
+                if (res.ok) return res;
+                if (attempt === retries) throw new Error(await res.text());
+            } catch (err) {
+                if (attempt === retries) throw err;
+            }
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        }
+    }
+
+    async function uploadFileChunked(file, filename, targetDir, onProgress) {
         // 1. Init
         const initRes = await fetch(`${BASE}/api/upload-chunk`, mutFetchOpts({
             method: 'POST',
@@ -380,26 +401,22 @@
         if (!initRes.ok) throw new Error(await initRes.text());
         const { upload_id } = await initRes.json();
 
-        // 2. Send chunks
+        // 2. Send chunks with retry
         let offset = 0;
         while (offset < file.size) {
             const end = Math.min(offset + CHUNK_SIZE, file.size);
             const chunk = file.slice(offset, end);
-            const putRes = await fetch(`${BASE}/api/upload-chunk?id=${encodeURIComponent(upload_id)}`, mutFetchOpts({
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/octet-stream', 'X-XSRFToken': XSRF },
-                body: chunk,
-            }));
-            if (!putRes.ok) throw new Error(await putRes.text());
+            await sendChunkWithRetry(
+                `${BASE}/api/upload-chunk?id=${encodeURIComponent(upload_id)}`,
+                mutFetchOpts({ method: 'PUT', headers: { 'Content-Type': 'application/octet-stream', 'X-XSRFToken': XSRF }, body: chunk }),
+                CHUNK_MAX_RETRIES,
+            );
             offset = end;
-            const pct = Math.round((offset / file.size) * 100);
-            showUploadProgress(filename, pct);
+            if (onProgress) onProgress(offset);
         }
 
         // 3. Finalize
-        const finRes = await fetch(`${BASE}/api/upload-chunk?id=${encodeURIComponent(upload_id)}`, mutFetchOpts({
-            method: 'DELETE',
-        }));
+        const finRes = await fetch(`${BASE}/api/upload-chunk?id=${encodeURIComponent(upload_id)}`, mutFetchOpts({ method: 'DELETE' }));
         if (!finRes.ok) throw new Error(await finRes.text());
     }
 
@@ -409,21 +426,25 @@
 
         try {
             if (useChunked) {
-                // Upload each file via chunked API
-                let uploaded = 0;
+                let bytesSent = 0;
                 for (const { file, relativePath } of filesWithPaths) {
                     const fname = relativePath || file.name;
                     if (file.size > CHUNKED_THRESHOLD) {
-                        await uploadFileChunked(file, fname, targetDir);
+                        const baseBytes = bytesSent;
+                        await uploadFileChunked(file, fname, targetDir, (fileOffset) => {
+                            const current = baseBytes + fileOffset;
+                            const pct = Math.round((current / totalSize) * 100);
+                            showUploadProgress(`${fname} (${formatSize(current)} / ${formatSize(totalSize)})`, pct);
+                        });
+                        bytesSent += file.size;
                     } else {
-                        // Small files: still use normal upload
                         const form = new FormData();
                         form.append('file', file, fname);
                         const res = await fetch(`${BASE}/api/upload?dir=${encodeURIComponent(targetDir || '')}`, mutFetchOpts({ method: 'POST', body: form }));
                         if (!res.ok) throw new Error(await res.text());
+                        bytesSent += file.size;
                     }
-                    uploaded++;
-                    showUploadProgress(`${uploaded}/${filesWithPaths.length} files`, Math.round((uploaded / filesWithPaths.length) * 100));
+                    showUploadProgress(`${fname} (${formatSize(bytesSent)} / ${formatSize(totalSize)})`, Math.round((bytesSent / totalSize) * 100));
                 }
             } else {
                 // Small files: single request with XHR for progress
@@ -440,8 +461,7 @@
                     xhr.upload.onprogress = (e) => {
                         if (e.lengthComputable) {
                             const pct = Math.round((e.loaded / e.total) * 100);
-                            const label = filesWithPaths.length === 1 ? filesWithPaths[0].file.name : `${filesWithPaths.length} files`;
-                            showUploadProgress(label, pct);
+                            showUploadProgress(`${formatSize(e.loaded)} / ${formatSize(e.total)}`, pct);
                         }
                     };
                     xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText));

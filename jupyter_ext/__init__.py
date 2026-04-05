@@ -654,16 +654,18 @@ def load_jupyter_server_extension(nb_app):
     workspace = Path(nb_app.notebook_dir).resolve()
     nb_app.web_app.settings["claude_notebook_path"] = workspace
 
-    # Allow large file uploads (10 GB)
-    _max_size = 10 * 1024 * 1024 * 1024  # 10 GB
-    nb_app.web_app.settings["websocket_max_message_size"] = _max_size
+    # Allow large file uploads — chunk size is 50 MB, set limit with headroom
+    _max_body = 100 * 1024 * 1024  # 100 MB (enough for 50 MB chunks + overhead)
+    # Patch Tornado HTTPServer settings reliably
+    nb_app.tornado_settings.update({
+        'max_body_size': _max_body,
+        'max_buffer_size': _max_body,
+    })
+    # Also try to patch already-created server (may or may not exist yet)
     server = getattr(nb_app, 'http_server', None)
     if server is not None:
-        server.max_body_size = _max_size
-        server.max_buffer_size = _max_size
-    # Also set on the application for new connections
-    nb_app.max_body_size = _max_size
-    nb_app.max_buffer_size = _max_size
+        server.max_body_size = _max_body
+        server.max_buffer_size = _max_body
 
     # Open new terminals in the workspace directory instead of process cwd
     term_mgr = nb_app.web_app.settings.get('terminal_manager')
