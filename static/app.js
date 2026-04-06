@@ -1768,16 +1768,15 @@
         html += '</div>';
 
         // Table
-        const totalCols = people.length * 7;
         html += '<div class="tt-scroll"><table class="tt-table">';
         // Header row 1: days
-        html += '<thead><tr><th class="tt-time-col" rowspan="2">시간</th>';
+        html += '<thead><tr><th class="tt-day-header tt-corner">시간</th>';
         TT_DAY_LABELS.forEach(d => {
             html += `<th colspan="${people.length || 1}" class="tt-day-header">${d}</th>`;
         });
         html += '</tr>';
         // Header row 2: people per day
-        html += '<tr>';
+        html += '<tr><th class="tt-person-header tt-corner"></th>';
         TT_DAYS.forEach(d => {
             if (people.length === 0) {
                 html += '<th class="tt-person-header">-</th>';
@@ -1976,12 +1975,28 @@
         html += `<button class="tt-add-person-btn" id="dtAddPerson">+ 추가</button>`;
         html += '</div>';
 
+        // Direct input form
+        html += '<div class="dt-input-form">';
+        html += '<span class="tt-toolbar-label">일정 추가:</span>';
+        html += `<input type="date" id="dtInputDate" class="dt-input" value="${year}-${String(month+1).padStart(2,'0')}-01">`;
+        html += '<span class="dt-input-sep">~</span>';
+        html += `<input type="date" id="dtInputDateEnd" class="dt-input">`;
+        html += `<select id="dtInputPerson" class="dt-input"><option value="">인원 선택</option>`;
+        people.forEach((p, i) => { html += `<option value="${i}">${escHtml(p.name)}</option>`; });
+        html += '</select>';
+        html += `<input type="text" id="dtInputReason" class="dt-input dt-input-reason" placeholder="사유 입력">`;
+        html += `<button class="dt-input-btn" id="dtInputAdd">추가</button>`;
+        html += '</div>';
+
         // Month navigation
         html += '<div class="dt-nav">';
         html += `<button class="dt-nav-btn" id="dtPrev">◀</button>`;
         html += `<span class="dt-nav-title">${year}년 ${monthNames[month]}</span>`;
         html += `<button class="dt-nav-btn" id="dtNext">▶</button>`;
         html += '</div>';
+
+        // Drag hint
+        html += '<div class="dt-drag-hint" id="dtDragHint" style="display:none;"></div>';
 
         // Calendar grid
         html += '<div class="dt-grid">';
@@ -2004,7 +2019,7 @@
             if (isToday) cls += ' dt-today';
 
             const events = _datetableData.events[dateStr] || [];
-            html += `<div class="${cls}" data-date="${dateStr}">`;
+            html += `<div class="${cls}" data-date="${dateStr}" data-day="${d}">`;
             html += `<div class="dt-date-num">${d}</div>`;
             html += '<div class="dt-events">';
             events.forEach((ev, ei) => {
@@ -2020,7 +2035,36 @@
         const remaining = (7 - totalCells % 7) % 7;
         for (let i = 0; i < remaining; i++) html += '<div class="dt-cell dt-empty"></div>';
 
-        html += '</div></div>';
+        html += '</div>';
+
+        // === Person summary section ===
+        if (people.length > 0) {
+            html += '<div class="dt-summary">';
+            html += '<div class="dt-summary-title">인원별 일정</div>';
+            people.forEach(p => {
+                const personEvents = [];
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const evts = (_datetableData.events[dateStr] || []).filter(ev => ev.person === p.name);
+                    evts.forEach(ev => personEvents.push({ date: dateStr, day: d, reason: ev.reason }));
+                }
+                html += `<div class="dt-summary-person">`;
+                html += `<div class="dt-summary-name" style="border-left:4px solid ${p.color};padding-left:8px;">${escHtml(p.name)} <span class="dt-summary-count">(${personEvents.length}건)</span></div>`;
+                if (personEvents.length === 0) {
+                    html += `<div class="dt-summary-empty">이번 달 일정 없음</div>`;
+                } else {
+                    html += '<div class="dt-summary-list">';
+                    personEvents.forEach(ev => {
+                        html += `<div class="dt-summary-item"><span class="dt-summary-date">${ev.day}일</span> ${escHtml(ev.reason || '-')}</div>`;
+                    });
+                    html += '</div>';
+                }
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
         previewBody.innerHTML = html;
 
         // === Event bindings ===
@@ -2042,7 +2086,6 @@
                 const idx = parseInt(el.dataset.idx);
                 const pName = people[idx].name;
                 if (!confirm(`"${pName}"을(를) 삭제하시겠습니까?`)) return;
-                // Remove events
                 for (const date in _datetableData.events) {
                     _datetableData.events[date] = _datetableData.events[date].filter(ev => ev.person !== pName);
                     if (_datetableData.events[date].length === 0) delete _datetableData.events[date];
@@ -2064,24 +2107,119 @@
             renderDatetable(JSON.stringify(_datetableData), filePath);
         });
 
-        // Click date cell: add event
+        // Direct input form
+        previewBody.querySelector('#dtInputAdd')?.addEventListener('click', () => {
+            const dateStart = previewBody.querySelector('#dtInputDate').value;
+            const dateEnd = previewBody.querySelector('#dtInputDateEnd').value;
+            const personIdx = previewBody.querySelector('#dtInputPerson').value;
+            const reason = previewBody.querySelector('#dtInputReason').value;
+            if (!dateStart || personIdx === '') { alert('날짜와 인원을 선택하세요.'); return; }
+            const idx = parseInt(personIdx);
+            const pName = people[idx].name;
+            // Generate date range
+            const start = new Date(dateStart);
+            const end = dateEnd ? new Date(dateEnd) : start;
+            if (end < start) { alert('종료일이 시작일보다 빠릅니다.'); return; }
+            for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+                const ds = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+                if (!_datetableData.events[ds]) _datetableData.events[ds] = [];
+                _datetableData.events[ds].push({ person: pName, reason: reason.trim() || '' });
+            }
+            renderDatetable(JSON.stringify(_datetableData), filePath);
+        });
+
+        // Drag selection on calendar cells
+        let dtDragStart = null;
+        let dtDragCells = new Set();
+        const dragHint = previewBody.querySelector('#dtDragHint');
+
+        function dtClearDragHighlight() {
+            previewBody.querySelectorAll('.dt-cell.dt-drag-selected').forEach(c => c.classList.remove('dt-drag-selected'));
+            dtDragCells.clear();
+        }
+
+        function dtGetDateRange(startDate, endDate) {
+            const s = Math.min(parseInt(startDate), parseInt(endDate));
+            const e = Math.max(parseInt(startDate), parseInt(endDate));
+            return { start: s, end: e };
+        }
+
         previewBody.querySelectorAll('.dt-cell[data-date]').forEach(cell => {
-            cell.addEventListener('click', (e) => {
-                if (e.target.closest('.dt-event')) return; // don't trigger on event click
-                const dateStr = cell.dataset.date;
-                if (people.length === 0) { alert('먼저 인원을 추가하세요.'); return; }
-                const personList = people.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
-                const choice = prompt(`${dateStr}\n인원 번호를 선택하세요:\n${personList}`);
-                if (!choice) return;
-                const idx = parseInt(choice) - 1;
-                if (idx < 0 || idx >= people.length) { alert('잘못된 번호입니다.'); return; }
-                const reason = prompt(`${people[idx].name}의 사유를 입력하세요:`);
-                if (reason === null) return;
-                if (!_datetableData.events[dateStr]) _datetableData.events[dateStr] = [];
-                _datetableData.events[dateStr].push({ person: people[idx].name, reason: reason.trim() || '' });
-                renderDatetable(JSON.stringify(_datetableData), filePath);
+            cell.addEventListener('mousedown', (e) => {
+                if (e.target.closest('.dt-event')) return;
+                e.preventDefault();
+                dtDragStart = cell.dataset.day;
+                dtClearDragHighlight();
+                cell.classList.add('dt-drag-selected');
+                dtDragCells.add(cell.dataset.day);
+            });
+            cell.addEventListener('mouseenter', () => {
+                if (!dtDragStart) return;
+                dtClearDragHighlight();
+                const { start, end } = dtGetDateRange(dtDragStart, cell.dataset.day);
+                previewBody.querySelectorAll('.dt-cell[data-day]').forEach(c => {
+                    const d = parseInt(c.dataset.day);
+                    if (d >= start && d <= end) {
+                        c.classList.add('dt-drag-selected');
+                        dtDragCells.add(c.dataset.day);
+                    }
+                });
+                if (dtDragCells.size > 1) {
+                    dragHint.style.display = '';
+                    dragHint.textContent = `${start}일 ~ ${end}일 (${dtDragCells.size}일간)`;
+                } else {
+                    dragHint.style.display = 'none';
+                }
             });
         });
+
+        const dtMouseUp = () => {
+            if (!dtDragStart) return;
+            if (dtDragCells.size > 1) {
+                // Multi-day drag complete → ask for event
+                if (people.length === 0) { alert('먼저 인원을 추가하세요.'); dtDragStart = null; dtClearDragHighlight(); dragHint.style.display = 'none'; return; }
+                const personList = people.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+                const days = Array.from(dtDragCells).map(Number).sort((a, b) => a - b);
+                const choice = prompt(`${days[0]}일 ~ ${days[days.length-1]}일\n인원 번호를 선택하세요:\n${personList}`);
+                if (choice) {
+                    const idx = parseInt(choice) - 1;
+                    if (idx >= 0 && idx < people.length) {
+                        const reason = prompt(`${people[idx].name}의 사유를 입력하세요:`);
+                        if (reason !== null) {
+                            days.forEach(d => {
+                                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                                if (!_datetableData.events[dateStr]) _datetableData.events[dateStr] = [];
+                                _datetableData.events[dateStr].push({ person: people[idx].name, reason: reason.trim() || '' });
+                            });
+                            renderDatetable(JSON.stringify(_datetableData), filePath);
+                        }
+                    }
+                }
+            } else if (dtDragCells.size === 1) {
+                // Single click
+                const day = Array.from(dtDragCells)[0];
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(parseInt(day)).padStart(2, '0')}`;
+                if (people.length === 0) { alert('먼저 인원을 추가하세요.'); } else {
+                    const personList = people.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+                    const choice = prompt(`${dateStr}\n인원 번호를 선택하세요:\n${personList}`);
+                    if (choice) {
+                        const idx = parseInt(choice) - 1;
+                        if (idx >= 0 && idx < people.length) {
+                            const reason = prompt(`${people[idx].name}의 사유를 입력하세요:`);
+                            if (reason !== null) {
+                                if (!_datetableData.events[dateStr]) _datetableData.events[dateStr] = [];
+                                _datetableData.events[dateStr].push({ person: people[idx].name, reason: reason.trim() || '' });
+                                renderDatetable(JSON.stringify(_datetableData), filePath);
+                            }
+                        }
+                    }
+                }
+            }
+            dtDragStart = null;
+            dtClearDragHighlight();
+            dragHint.style.display = 'none';
+        };
+        document.addEventListener('mouseup', dtMouseUp);
 
         // Click event: edit/delete
         previewBody.querySelectorAll('.dt-event').forEach(el => {
