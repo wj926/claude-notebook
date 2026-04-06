@@ -1411,7 +1411,7 @@ tr:first-child .csv-row-actions {
     position: relative;
 }
 .tt-table {
-    border-collapse: separate; border-spacing: 0;
+    border-collapse: collapse;
     width: 100%; min-width: 800px;
     font-size: 12px;
 }
@@ -1426,10 +1426,12 @@ tr:first-child .csv-row-actions {
 .tt-day-header {
     background: var(--sidebar); font-weight: 700; font-size: 13px;
     padding: 6px 4px; position: sticky; top: 0; z-index: 5;
+    box-shadow: 0 1px 0 var(--border);
 }
 .tt-person-header {
-    background: var(--bg); font-weight: 600; font-size: 11px;
+    background: var(--sidebar); font-weight: 600; font-size: 11px;
     position: sticky; top: 31px; z-index: 5;
+    box-shadow: 0 1px 0 var(--border);
 }
 .tt-time-cell {
     font-size: 11px; font-weight: 600; color: var(--text-secondary);
