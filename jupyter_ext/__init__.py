@@ -8,6 +8,7 @@ import time
 import uuid
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from tornado import web
 from tornado.ioloop import IOLoop
@@ -533,9 +534,10 @@ class WorkspaceDownloadHandler(BaseHandler):
 
         if full_path.is_dir():
             # Folder download: stream as zip
+            zip_name = full_path.name + ".zip"
             self.set_header("Content-Type", "application/zip")
             self.set_header("Content-Disposition",
-                            f'attachment; filename="{full_path.name}.zip"')
+                            f"attachment; filename*=UTF-8''{quote(zip_name)}")
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 for root, dirs, files in os.walk(full_path):
@@ -557,7 +559,7 @@ class WorkspaceDownloadHandler(BaseHandler):
             file_size = full_path.stat().st_size
             self.set_header("Content-Type", "application/octet-stream")
             self.set_header("Content-Disposition",
-                            f'attachment; filename="{full_path.name}"')
+                            f"attachment; filename*=UTF-8''{quote(full_path.name)}")
             self.set_header("Content-Length", str(file_size))
             chunk_size = 4 * 1024 * 1024  # 4 MB
             with open(full_path, "rb") as f:

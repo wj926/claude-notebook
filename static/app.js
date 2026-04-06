@@ -264,11 +264,15 @@
             if (!res.ok) throw new Error('Download failed');
             const blob = await res.blob();
             const disposition = res.headers.get('Content-Disposition') || '';
-            const fnameMatch = disposition.match(/filename="(.+?)"/);
+            let dlName = path.split('/').pop();
+            const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/i);
+            const plainMatch = disposition.match(/filename="(.+?)"/);
+            if (utf8Match) dlName = decodeURIComponent(utf8Match[1]);
+            else if (plainMatch) dlName = plainMatch[1];
             const objectUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = objectUrl;
-            a.download = fnameMatch ? fnameMatch[1] : path.split('/').pop();
+            a.download = dlName;
             document.body.appendChild(a);
             a.click();
             a.remove();
