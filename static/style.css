@@ -406,6 +406,33 @@ html, body {
     transition: width 0.2s ease;
 }
 
+/* Selection bar */
+.selection-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    margin-bottom: 8px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+.selection-bar-count { font-weight: 600; }
+.selection-bar-actions { display: flex; gap: 6px; }
+.selection-bar-btn {
+    background: rgba(255,255,255,0.2);
+    border: none;
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.selection-bar-btn:hover { background: rgba(255,255,255,0.35); }
+.selection-bar-btn.danger:hover { background: #e03e3e; }
+
 /* Context menu */
 .finder-context {
     position: fixed;

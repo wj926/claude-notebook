@@ -514,6 +514,79 @@ class WorkspaceMkdirHandler(BaseHandler):
         self.json_response({"created": dir_path})
 
 
+class WorkspaceDeleteMultiHandler(BaseHandler):
+    """Delete multiple files/folders in the workspace."""
+    @web.authenticated
+    def post(self):
+        import shutil
+        workspace = self.get_workspace()
+        body = json.loads(self.request.body)
+        paths = body.get("paths", [])
+        if not paths:
+            raise web.HTTPError(400, "paths required")
+        deleted = []
+        errors = []
+        for file_path in paths:
+            if not file_path or not is_safe_path(workspace, file_path):
+                errors.append({"path": file_path, "error": "Invalid path"})
+                continue
+            full_path = (workspace / file_path).resolve()
+            if not full_path.exists():
+                errors.append({"path": file_path, "error": "Not found"})
+                continue
+            if full_path == workspace or ".agent" in full_path.parts:
+                errors.append({"path": file_path, "error": "Cannot delete this path"})
+                continue
+            try:
+                if full_path.is_dir():
+                    shutil.rmtree(full_path)
+                else:
+                    full_path.unlink()
+                deleted.append(file_path)
+            except OSError as e:
+                errors.append({"path": file_path, "error": str(e)})
+        self.json_response({"deleted": deleted, "errors": errors})
+
+
+class WorkspaceDownloadMultiHandler(BaseHandler):
+    """Download multiple files/folders as a single zip."""
+    @web.authenticated
+    async def post(self):
+        workspace = self.get_workspace()
+        body = json.loads(self.request.body)
+        paths = body.get("paths", [])
+        if not paths:
+            raise web.HTTPError(400, "paths required")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in paths:
+                if not file_path or not is_safe_path(workspace, file_path):
+                    continue
+                full_path = (workspace / file_path).resolve()
+                if not full_path.exists():
+                    continue
+                if full_path.is_dir():
+                    for root, dirs, files in os.walk(full_path):
+                        root_path = Path(root)
+                        if not files and not dirs:
+                            arcname = str(root_path.relative_to(workspace)) + "/"
+                            zf.writestr(arcname, "")
+                        for fname in files:
+                            fpath = root_path / fname
+                            arcname = str(fpath.relative_to(workspace))
+                            zf.write(fpath, arcname)
+                else:
+                    arcname = str(full_path.relative_to(workspace))
+                    zf.write(full_path, arcname)
+        data = buf.getvalue()
+        self.set_header("Content-Type", "application/zip")
+        self.set_header("Content-Disposition",
+                        "attachment; filename*=UTF-8''selected-files.zip")
+        self.set_header("Content-Length", str(len(data)))
+        self.write(data)
+        self.finish()
+
+
 class WorkspaceRenameHandler(BaseHandler):
     """Rename a file or folder in the workspace."""
     @web.authenticated
@@ -793,6 +866,8 @@ def load_jupyter_server_extension(nb_app):
         (ujoin(base_url, r"/claude-notebook/api/delete"), WorkspaceDeleteHandler),
         (ujoin(base_url, r"/claude-notebook/api/newfile"), WorkspaceNewFileHandler),
         (ujoin(base_url, r"/claude-notebook/api/mkdir"), WorkspaceMkdirHandler),
+        (ujoin(base_url, r"/claude-notebook/api/delete-multi"), WorkspaceDeleteMultiHandler),
+        (ujoin(base_url, r"/claude-notebook/api/download-multi"), WorkspaceDownloadMultiHandler),
         (ujoin(base_url, r"/claude-notebook/api/rename"), WorkspaceRenameHandler),
         (ujoin(base_url, r"/claude-notebook/api/download"), WorkspaceDownloadHandler),
         (ujoin(base_url, r"/claude-notebook/api/terminal-upload"), TerminalUploadHandler),

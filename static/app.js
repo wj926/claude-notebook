@@ -165,11 +165,97 @@
         });
     }
 
+    // === Multi-select state ===
+    let selectedPaths = new Set();
+    let lastClickedIndex = -1;
+    let currentItems = [];
+
+    function clearSelection() {
+        selectedPaths.clear();
+        lastClickedIndex = -1;
+        finderGrid.querySelectorAll('.finder-item.selected').forEach(el => el.classList.remove('selected'));
+        updateSelectionBar();
+    }
+
+    function updateSelectionBar() {
+        let bar = document.getElementById('selectionBar');
+        if (selectedPaths.size === 0) {
+            if (bar) bar.style.display = 'none';
+            return;
+        }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'selectionBar';
+            bar.className = 'selection-bar';
+            const finder = document.getElementById('finder');
+            finder.insertBefore(bar, finderGrid);
+        }
+        bar.style.display = '';
+        bar.innerHTML = `
+            <span class="selection-bar-count">${selectedPaths.size} selected</span>
+            <div class="selection-bar-actions">
+                <button class="selection-bar-btn" id="selDownloadBtn" title="Download selected">📥 Download</button>
+                <button class="selection-bar-btn danger" id="selDeleteBtn" title="Delete selected">🗑 Delete</button>
+                <button class="selection-bar-btn" id="selCancelBtn" title="Clear selection">✕</button>
+            </div>`;
+        document.getElementById('selCancelBtn').addEventListener('click', clearSelection);
+        document.getElementById('selDeleteBtn').addEventListener('click', deleteSelected);
+        document.getElementById('selDownloadBtn').addEventListener('click', downloadSelected);
+    }
+
+    async function deleteSelected() {
+        const paths = Array.from(selectedPaths);
+        if (!confirm(`Delete ${paths.length} item(s)?`)) return;
+        try {
+            const res = await fetch(`${BASE}/api/delete-multi`, mutFetchOpts({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
+                body: JSON.stringify({ paths }),
+            }));
+            if (!res.ok) throw new Error(await res.text());
+            const data = await res.json();
+            if (data.errors && data.errors.length) {
+                alert('Some items failed to delete:\n' + data.errors.map(e => e.path + ': ' + e.error).join('\n'));
+            }
+            clearSelection();
+            loadFinderGrid(currentFinderPath);
+            loadTree();
+        } catch (err) {
+            alert('Delete failed: ' + err.message);
+        }
+    }
+
+    async function downloadSelected() {
+        const paths = Array.from(selectedPaths);
+        try {
+            const res = await fetch(`${BASE}/api/download-multi`, mutFetchOpts({
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
+                body: JSON.stringify({ paths }),
+            }));
+            if (!res.ok) throw new Error('Download failed');
+            const blob = await res.blob();
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = 'selected-files.zip';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(objectUrl);
+        } catch (err) {
+            alert('Download failed: ' + err.message);
+        }
+    }
+
     // === Finder Grid ===
     async function loadFinderGrid(dirPath) {
         currentFinderPath = dirPath || '';
+        selectedPaths.clear();
+        updateSelectionBar();
         try {
             const items = await fetchTreeLevel(dirPath);
+            currentItems = items;
             finderGrid.innerHTML = '';
             // Sort by name (folders first, then files)
             items.sort((a, b) => {
@@ -182,26 +268,59 @@
             } else {
                 finderEmpty.style.display = 'none';
                 finderGrid.style.display = '';
-                items.forEach((item) => {
+                items.forEach((item, idx) => {
                     const el = document.createElement('div');
                     el.className = 'finder-item';
                     el.dataset.path = item.path;
                     el.dataset.type = item.type;
                     el.dataset.name = item.name;
+                    el.dataset.index = idx;
                     const icon = item.type === 'directory' ? '📁' : getFileIcon(item.name);
                     el.innerHTML = `<div class="finder-item-icon">${icon}</div><div class="finder-item-name">${escHtml(item.name)}</div>`;
-                    // Click: folder → navigate, file → preview
-                    el.addEventListener('click', () => {
-                        if (item.type === 'directory') {
-                            loadFinderGrid(item.path);
+                    // Click: multi-select or navigate
+                    el.addEventListener('click', (e) => {
+                        if (e.ctrlKey || e.metaKey) {
+                            // Toggle selection
+                            if (selectedPaths.has(item.path)) {
+                                selectedPaths.delete(item.path);
+                                el.classList.remove('selected');
+                            } else {
+                                selectedPaths.add(item.path);
+                                el.classList.add('selected');
+                            }
+                            lastClickedIndex = idx;
+                            updateSelectionBar();
+                        } else if (e.shiftKey && lastClickedIndex >= 0) {
+                            // Range selection
+                            const start = Math.min(lastClickedIndex, idx);
+                            const end = Math.max(lastClickedIndex, idx);
+                            for (let i = start; i <= end; i++) {
+                                selectedPaths.add(currentItems[i].path);
+                                finderGrid.children[i].classList.add('selected');
+                            }
+                            updateSelectionBar();
                         } else {
-                            openPreview(item.path);
+                            // Normal click: if items are selected, clear selection
+                            if (selectedPaths.size > 0) {
+                                clearSelection();
+                                return;
+                            }
+                            if (item.type === 'directory') {
+                                loadFinderGrid(item.path);
+                            } else {
+                                openPreview(item.path);
+                            }
                         }
                     });
                     // Right-click: context menu
                     el.addEventListener('contextmenu', (e) => {
                         e.preventDefault();
-                        showContextMenu(e.clientX, e.clientY, item);
+                        if (selectedPaths.size > 1 && selectedPaths.has(item.path)) {
+                            showMultiContextMenu(e.clientX, e.clientY);
+                        } else {
+                            clearSelection();
+                            showContextMenu(e.clientX, e.clientY, item);
+                        }
                     });
                     finderGrid.appendChild(el);
                 });
@@ -251,6 +370,30 @@
         if (rect.right > window.innerWidth) contextEl.style.left = (x - rect.width) + 'px';
         if (rect.bottom > window.innerHeight) contextEl.style.top = (y - rect.height) + 'px';
     }
+    function showMultiContextMenu(x, y) {
+        hideContextMenu();
+        contextEl = document.createElement('div');
+        contextEl.className = 'finder-context';
+        contextEl.style.left = x + 'px';
+        contextEl.style.top = y + 'px';
+        const count = selectedPaths.size;
+        const actions = [
+            { label: `📥 Download ${count} items`, action: () => downloadSelected() },
+            { label: `🗑 Delete ${count} items`, cls: 'danger', action: () => deleteSelected() },
+        ];
+        actions.forEach(({ label, cls, action }) => {
+            const el = document.createElement('div');
+            el.className = 'finder-context-item' + (cls ? ' ' + cls : '');
+            el.textContent = label;
+            el.addEventListener('click', () => { hideContextMenu(); action(); });
+            contextEl.appendChild(el);
+        });
+        document.body.appendChild(contextEl);
+        const rect = contextEl.getBoundingClientRect();
+        if (rect.right > window.innerWidth) contextEl.style.left = (x - rect.width) + 'px';
+        if (rect.bottom > window.innerHeight) contextEl.style.top = (y - rect.height) + 'px';
+    }
+
     function hideContextMenu() {
         if (contextEl) { contextEl.remove(); contextEl = null; }
     }
