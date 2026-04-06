@@ -612,9 +612,12 @@
     });
 
     // === Preview Overlay ===
-    const EDITABLE_EXTS = ['.md', '.markdown', '.csv', '.txt', '.py', '.js', '.json', '.yaml', '.yml', '.html', '.css', '.sh', '.toml', '.cfg', '.ini', '.xml'];
+    const EDITABLE_EXTS = ['.md', '.markdown', '.csv', '.txt', '.py', '.js', '.json', '.yaml', '.yml', '.html', '.css', '.sh', '.toml', '.cfg', '.ini', '.xml', '.timetable', '.datetable'];
     const CSV_EXTS = ['.csv'];
     const MD_EXTS = ['.md', '.markdown'];
+    const TIMETABLE_EXTS = ['.timetable'];
+    const DATETABLE_EXTS = ['.datetable'];
+    const SCHEDULE_EXTS = ['.timetable', '.datetable']; // always-interactive types
 
     function openPreview(path) {
         currentPreviewPath = path;
@@ -679,6 +682,10 @@
         const ext = currentFileData.extension;
         if (CSV_EXTS.includes(ext)) {
             content = csvTableToString();
+        } else if (TIMETABLE_EXTS.includes(ext)) {
+            content = JSON.stringify(_timetableData, null, 2);
+        } else if (DATETABLE_EXTS.includes(ext)) {
+            content = JSON.stringify(_datetableData, null, 2);
         } else {
             const ta = previewBody.querySelector('.edit-textarea');
             if (!ta) return;
@@ -703,11 +710,16 @@
 
     async function renderPreviewMode(data) {
         const isCsv = CSV_EXTS.includes(data.extension);
+        const isSchedule = SCHEDULE_EXTS.includes(data.extension);
         previewBody.classList.toggle('csv-mode', isCsv);
         previewColorRules.style.display = isCsv ? '' : 'none';
         if (isCsv) {
             await loadCsvConfig();
             renderCsvViewer(data.content);
+        } else if (TIMETABLE_EXTS.includes(data.extension)) {
+            renderTimetable(data.content, data.path);
+        } else if (DATETABLE_EXTS.includes(data.extension)) {
+            renderDatetable(data.content, data.path);
         } else if (MD_EXTS.includes(data.extension) && typeof marked !== 'undefined') {
             previewBody.innerHTML = `<div class="markdown-body">${marked.parse(data.content)}</div>`;
             if (typeof hljs !== 'undefined') {
@@ -715,6 +727,11 @@
             }
         } else {
             previewBody.innerHTML = `<pre class="file-raw">${escHtml(data.content)}</pre>`;
+        }
+        // Schedule types: always show save button
+        if (isSchedule) {
+            previewSave.style.display = '';
+            previewEdit.style.display = 'none';
         }
     }
 
@@ -724,6 +741,10 @@
         if (isCsv) {
             await loadCsvConfig();
             renderCsvEditor(data.content);
+        } else if (SCHEDULE_EXTS.includes(data.extension)) {
+            // Schedule types are always interactive, no separate edit mode
+            renderPreviewMode(data);
+            return;
         } else {
             previewBody.innerHTML = `<textarea class="edit-textarea" spellcheck="false">${escHtml(data.content)}</textarea>`;
             const ta = previewBody.querySelector('.edit-textarea');
@@ -1536,6 +1557,385 @@
         } else if (!hashInitialized) {
             hashInitialized = true;
         }
+    }
+
+    // =========================================================================
+    // Timetable (.timetable) — Weekly schedule with people columns
+    // =========================================================================
+    let _timetableData = null;
+    const TT_DAYS = ['mon','tue','wed','thu','fri','sat','sun'];
+    const TT_DAY_LABELS = ['월','화','수','목','금','토','일'];
+    const TT_COLORS = ['#4A90D9','#E67E73','#61BD4F','#F5A623','#8E6EC8','#00BCD4','#FF7043','#AED581','#CE93D8','#FFD54F'];
+
+    function ttTimeSlots() {
+        const slots = [];
+        for (let h = 9; h <= 22; h++) {
+            slots.push(`${String(h).padStart(2,'0')}:00`);
+            slots.push(`${String(h).padStart(2,'0')}:30`);
+        }
+        return slots; // 09:00 ~ 22:30, 28 slots
+    }
+
+    function ttSlotIndex(time) { return ttTimeSlots().indexOf(time); }
+
+    function renderTimetable(content, filePath) {
+        try { _timetableData = JSON.parse(content); } catch { _timetableData = { people: [], schedule: {} }; }
+        if (!_timetableData.people) _timetableData.people = [];
+        if (!_timetableData.schedule) _timetableData.schedule = {};
+        TT_DAYS.forEach(d => { if (!_timetableData.schedule[d]) _timetableData.schedule[d] = {}; });
+
+        const people = _timetableData.people;
+        const schedule = _timetableData.schedule;
+        const slots = ttTimeSlots();
+
+        // Assign colors
+        people.forEach((p, i) => { if (!p.color) p.color = TT_COLORS[i % TT_COLORS.length]; });
+
+        let html = '<div class="tt-container">';
+        // Toolbar: manage people
+        html += '<div class="tt-toolbar">';
+        html += '<span class="tt-toolbar-label">인원:</span>';
+        people.forEach((p, i) => {
+            html += `<span class="tt-person-tag" style="background:${p.color}" data-idx="${i}">${escHtml(p.name)} <span class="tt-person-remove" data-idx="${i}">&times;</span></span>`;
+        });
+        html += `<button class="tt-add-person-btn" id="ttAddPerson">+ 추가</button>`;
+        html += '</div>';
+
+        // Table
+        const totalCols = people.length * 7;
+        html += '<div class="tt-scroll"><table class="tt-table">';
+        // Header row 1: days
+        html += '<thead><tr><th class="tt-time-col" rowspan="2">시간</th>';
+        TT_DAY_LABELS.forEach(d => {
+            html += `<th colspan="${people.length || 1}" class="tt-day-header">${d}</th>`;
+        });
+        html += '</tr>';
+        // Header row 2: people per day
+        html += '<tr>';
+        TT_DAYS.forEach(d => {
+            if (people.length === 0) {
+                html += '<th class="tt-person-header">-</th>';
+            } else {
+                people.forEach(p => {
+                    html += `<th class="tt-person-header" style="color:${p.color}">${escHtml(p.name)}</th>`;
+                });
+            }
+        });
+        html += '</tr></thead>';
+
+        // Body
+        html += '<tbody>';
+        slots.forEach((slot, si) => {
+            html += '<tr>';
+            html += `<td class="tt-time-cell">${slot}</td>`;
+            TT_DAYS.forEach((day, di) => {
+                if (people.length === 0) {
+                    html += '<td class="tt-cell tt-empty"></td>';
+                } else {
+                    people.forEach((p, pi) => {
+                        const blocks = schedule[day]?.[p.name] || [];
+                        const block = blocks.find(b => {
+                            const s = ttSlotIndex(b.start), e = ttSlotIndex(b.end);
+                            return si >= s && si < e;
+                        });
+                        if (block) {
+                            const s = ttSlotIndex(block.start);
+                            if (si === s) {
+                                const span = ttSlotIndex(block.end) - s;
+                                html += `<td class="tt-cell tt-block" rowspan="${span}" style="background:${p.color}20;border-left:3px solid ${p.color}" data-day="${day}" data-person="${p.name}" data-start="${block.start}" data-end="${block.end}"><span class="tt-block-label">${escHtml(block.label || '')}</span></td>`;
+                            }
+                            // Other slots in block: skip (rowspan covers them)
+                        } else {
+                            // Check if this cell is covered by a rowspan above
+                            const covered = blocks.some(b => {
+                                const s = ttSlotIndex(b.start), e = ttSlotIndex(b.end);
+                                return si > s && si < e;
+                            });
+                            if (!covered) {
+                                html += `<td class="tt-cell" data-day="${day}" data-person="${p.name}" data-slot="${slot}"></td>`;
+                            }
+                        }
+                    });
+                }
+            });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+        previewBody.innerHTML = html;
+
+        // === Event bindings ===
+        // Add person
+        const addBtn = previewBody.querySelector('#ttAddPerson');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            const name = prompt('인원 이름을 입력하세요:');
+            if (!name || !name.trim()) return;
+            const trimmed = name.trim();
+            if (people.some(p => p.name === trimmed)) { alert('이미 존재하는 이름입니다.'); return; }
+            people.push({ name: trimmed, color: TT_COLORS[people.length % TT_COLORS.length] });
+            renderTimetable(JSON.stringify(_timetableData), filePath);
+        });
+
+        // Remove person
+        previewBody.querySelectorAll('.tt-person-remove').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(el.dataset.idx);
+                const pName = people[idx].name;
+                if (!confirm(`"${pName}"을(를) 삭제하시겠습니까?`)) return;
+                // Remove from schedule
+                TT_DAYS.forEach(d => { delete schedule[d]?.[pName]; });
+                people.splice(idx, 1);
+                renderTimetable(JSON.stringify(_timetableData), filePath);
+            });
+        });
+
+        // Click empty cell: add block
+        previewBody.querySelectorAll('.tt-cell[data-slot]').forEach(td => {
+            td.addEventListener('click', () => {
+                const day = td.dataset.day, person = td.dataset.person, slot = td.dataset.slot;
+                const label = prompt(`${TT_DAY_LABELS[TT_DAYS.indexOf(day)]} ${slot} - ${person}\n일정명을 입력하세요:`);
+                if (label === null) return;
+                // Ask for end time
+                const si = ttSlotIndex(slot);
+                const slots2 = ttTimeSlots();
+                const endOptions = slots2.slice(si + 1).concat(['23:00']);
+                const endTime = prompt(`종료 시간을 입력하세요 (예: ${slots2[Math.min(si+2, slots2.length-1)] || '23:00'}):`, slots2[Math.min(si + 2, slots2.length - 1)] || '23:00');
+                if (!endTime) return;
+                if (!schedule[day]) schedule[day] = {};
+                if (!schedule[day][person]) schedule[day][person] = [];
+                schedule[day][person].push({ start: slot, end: endTime, label: label.trim() });
+                // Sort blocks
+                schedule[day][person].sort((a, b) => ttSlotIndex(a.start) - ttSlotIndex(b.start));
+                renderTimetable(JSON.stringify(_timetableData), filePath);
+            });
+        });
+
+        // Click block: edit/delete
+        previewBody.querySelectorAll('.tt-block').forEach(td => {
+            td.addEventListener('click', () => {
+                const day = td.dataset.day, person = td.dataset.person;
+                const start = td.dataset.start, end = td.dataset.end;
+                const blocks = schedule[day]?.[person] || [];
+                const block = blocks.find(b => b.start === start && b.end === end);
+                if (!block) return;
+                const action = prompt(`"${block.label}" (${start}~${end})\n수정: 새 이름 입력\n삭제: "delete" 입력`, block.label);
+                if (action === null) return;
+                if (action.toLowerCase() === 'delete') {
+                    schedule[day][person] = blocks.filter(b => b !== block);
+                } else {
+                    block.label = action.trim();
+                }
+                renderTimetable(JSON.stringify(_timetableData), filePath);
+            });
+        });
+
+        // Drag selection
+        let dragStart = null;
+        previewBody.querySelectorAll('.tt-cell[data-slot]').forEach(td => {
+            td.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                dragStart = { day: td.dataset.day, person: td.dataset.person, slot: td.dataset.slot, el: td };
+                td.classList.add('tt-drag-active');
+            });
+            td.addEventListener('mouseenter', () => {
+                if (!dragStart) return;
+                if (td.dataset.day !== dragStart.day || td.dataset.person !== dragStart.person) return;
+                // Highlight range
+                previewBody.querySelectorAll('.tt-drag-active').forEach(el => el.classList.remove('tt-drag-active'));
+                const s = Math.min(ttSlotIndex(dragStart.slot), ttSlotIndex(td.dataset.slot));
+                const e2 = Math.max(ttSlotIndex(dragStart.slot), ttSlotIndex(td.dataset.slot));
+                const slots2 = ttTimeSlots();
+                previewBody.querySelectorAll(`.tt-cell[data-day="${dragStart.day}"][data-person="${dragStart.person}"]`).forEach(c => {
+                    const ci = ttSlotIndex(c.dataset.slot);
+                    if (ci >= s && ci <= e2) c.classList.add('tt-drag-active');
+                });
+            });
+        });
+        document.addEventListener('mouseup', () => {
+            if (!dragStart) return;
+            const activeCells = previewBody.querySelectorAll('.tt-drag-active');
+            if (activeCells.length > 1) {
+                const slotsArr = Array.from(activeCells).map(c => c.dataset.slot).sort();
+                const startSlot = slotsArr[0];
+                const endIdx = ttSlotIndex(slotsArr[slotsArr.length - 1]) + 1;
+                const allSlots = ttTimeSlots();
+                const endSlot = endIdx < allSlots.length ? allSlots[endIdx] : '23:00';
+                const day = dragStart.day, person = dragStart.person;
+                const label = prompt(`${TT_DAY_LABELS[TT_DAYS.indexOf(day)]} ${startSlot}~${endSlot} - ${person}\n일정명을 입력하세요:`);
+                if (label !== null && label.trim()) {
+                    if (!schedule[day]) schedule[day] = {};
+                    if (!schedule[day][person]) schedule[day][person] = [];
+                    schedule[day][person].push({ start: startSlot, end: endSlot, label: label.trim() });
+                    schedule[day][person].sort((a, b) => ttSlotIndex(a.start) - ttSlotIndex(b.start));
+                    renderTimetable(JSON.stringify(_timetableData), filePath);
+                }
+            }
+            activeCells.forEach(c => c.classList.remove('tt-drag-active'));
+            dragStart = null;
+        });
+    }
+
+    // =========================================================================
+    // Datetable (.datetable) — Monthly calendar with people events
+    // =========================================================================
+    let _datetableData = null;
+    let _dtCurrentMonth = null; // { year, month } for navigation
+
+    function renderDatetable(content, filePath) {
+        try { _datetableData = JSON.parse(content); } catch { _datetableData = { people: [], events: {} }; }
+        if (!_datetableData.people) _datetableData.people = [];
+        if (!_datetableData.events) _datetableData.events = {};
+
+        const people = _datetableData.people;
+        people.forEach((p, i) => { if (!p.color) p.color = TT_COLORS[i % TT_COLORS.length]; });
+
+        const today = new Date();
+        if (!_dtCurrentMonth) _dtCurrentMonth = { year: today.getFullYear(), month: today.getMonth() };
+        const { year, month } = _dtCurrentMonth;
+
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDow = firstDay.getDay(); // 0=Sun
+        const daysInMonth = lastDay.getDate();
+
+        const monthNames = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+
+        let html = '<div class="dt-container">';
+        // Toolbar: people management
+        html += '<div class="dt-toolbar">';
+        html += '<span class="tt-toolbar-label">인원:</span>';
+        people.forEach((p, i) => {
+            html += `<span class="tt-person-tag" style="background:${p.color}" data-idx="${i}">${escHtml(p.name)} <span class="dt-person-remove" data-idx="${i}">&times;</span></span>`;
+        });
+        html += `<button class="tt-add-person-btn" id="dtAddPerson">+ 추가</button>`;
+        html += '</div>';
+
+        // Month navigation
+        html += '<div class="dt-nav">';
+        html += `<button class="dt-nav-btn" id="dtPrev">◀</button>`;
+        html += `<span class="dt-nav-title">${year}년 ${monthNames[month]}</span>`;
+        html += `<button class="dt-nav-btn" id="dtNext">▶</button>`;
+        html += '</div>';
+
+        // Calendar grid
+        html += '<div class="dt-grid">';
+        const dowLabels = ['일','월','화','수','목','금','토'];
+        dowLabels.forEach((d, i) => {
+            const cls = i === 0 ? 'dt-dow dt-sun' : i === 6 ? 'dt-dow dt-sat' : 'dt-dow';
+            html += `<div class="${cls}">${d}</div>`;
+        });
+
+        // Empty cells before first day
+        for (let i = 0; i < startDow; i++) html += '<div class="dt-cell dt-empty"></div>';
+
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const dow = (startDow + d - 1) % 7;
+            const isToday = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+            let cls = 'dt-cell';
+            if (dow === 0) cls += ' dt-sun';
+            if (dow === 6) cls += ' dt-sat';
+            if (isToday) cls += ' dt-today';
+
+            const events = _datetableData.events[dateStr] || [];
+            html += `<div class="${cls}" data-date="${dateStr}">`;
+            html += `<div class="dt-date-num">${d}</div>`;
+            html += '<div class="dt-events">';
+            events.forEach((ev, ei) => {
+                const person = people.find(p => p.name === ev.person);
+                const color = person ? person.color : '#999';
+                html += `<div class="dt-event" style="background:${color}20;border-left:3px solid ${color}" data-date="${dateStr}" data-eidx="${ei}">${escHtml(ev.person)}(${escHtml(ev.reason)})</div>`;
+            });
+            html += '</div></div>';
+        }
+
+        // Fill remaining cells
+        const totalCells = startDow + daysInMonth;
+        const remaining = (7 - totalCells % 7) % 7;
+        for (let i = 0; i < remaining; i++) html += '<div class="dt-cell dt-empty"></div>';
+
+        html += '</div></div>';
+        previewBody.innerHTML = html;
+
+        // === Event bindings ===
+        // Add person
+        const addBtn = previewBody.querySelector('#dtAddPerson');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            const name = prompt('인원 이름을 입력하세요:');
+            if (!name || !name.trim()) return;
+            const trimmed = name.trim();
+            if (people.some(p => p.name === trimmed)) { alert('이미 존재하는 이름입니다.'); return; }
+            people.push({ name: trimmed, color: TT_COLORS[people.length % TT_COLORS.length] });
+            renderDatetable(JSON.stringify(_datetableData), filePath);
+        });
+
+        // Remove person
+        previewBody.querySelectorAll('.dt-person-remove').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(el.dataset.idx);
+                const pName = people[idx].name;
+                if (!confirm(`"${pName}"을(를) 삭제하시겠습니까?`)) return;
+                // Remove events
+                for (const date in _datetableData.events) {
+                    _datetableData.events[date] = _datetableData.events[date].filter(ev => ev.person !== pName);
+                    if (_datetableData.events[date].length === 0) delete _datetableData.events[date];
+                }
+                people.splice(idx, 1);
+                renderDatetable(JSON.stringify(_datetableData), filePath);
+            });
+        });
+
+        // Month navigation
+        previewBody.querySelector('#dtPrev')?.addEventListener('click', () => {
+            _dtCurrentMonth.month--;
+            if (_dtCurrentMonth.month < 0) { _dtCurrentMonth.month = 11; _dtCurrentMonth.year--; }
+            renderDatetable(JSON.stringify(_datetableData), filePath);
+        });
+        previewBody.querySelector('#dtNext')?.addEventListener('click', () => {
+            _dtCurrentMonth.month++;
+            if (_dtCurrentMonth.month > 11) { _dtCurrentMonth.month = 0; _dtCurrentMonth.year++; }
+            renderDatetable(JSON.stringify(_datetableData), filePath);
+        });
+
+        // Click date cell: add event
+        previewBody.querySelectorAll('.dt-cell[data-date]').forEach(cell => {
+            cell.addEventListener('click', (e) => {
+                if (e.target.closest('.dt-event')) return; // don't trigger on event click
+                const dateStr = cell.dataset.date;
+                if (people.length === 0) { alert('먼저 인원을 추가하세요.'); return; }
+                const personList = people.map((p, i) => `${i + 1}. ${p.name}`).join('\n');
+                const choice = prompt(`${dateStr}\n인원 번호를 선택하세요:\n${personList}`);
+                if (!choice) return;
+                const idx = parseInt(choice) - 1;
+                if (idx < 0 || idx >= people.length) { alert('잘못된 번호입니다.'); return; }
+                const reason = prompt(`${people[idx].name}의 사유를 입력하세요:`);
+                if (reason === null) return;
+                if (!_datetableData.events[dateStr]) _datetableData.events[dateStr] = [];
+                _datetableData.events[dateStr].push({ person: people[idx].name, reason: reason.trim() || '' });
+                renderDatetable(JSON.stringify(_datetableData), filePath);
+            });
+        });
+
+        // Click event: edit/delete
+        previewBody.querySelectorAll('.dt-event').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dateStr = el.dataset.date;
+                const eidx = parseInt(el.dataset.eidx);
+                const ev = _datetableData.events[dateStr]?.[eidx];
+                if (!ev) return;
+                const action = prompt(`${ev.person}(${ev.reason})\n수정: 새 사유 입력\n삭제: "delete" 입력`, ev.reason);
+                if (action === null) return;
+                if (action.toLowerCase() === 'delete') {
+                    _datetableData.events[dateStr].splice(eidx, 1);
+                    if (_datetableData.events[dateStr].length === 0) delete _datetableData.events[dateStr];
+                } else {
+                    ev.reason = action.trim();
+                }
+                renderDatetable(JSON.stringify(_datetableData), filePath);
+            });
+        });
     }
 
     // Patch loadFinderGrid to update hash and title

@@ -1350,3 +1350,130 @@ tr:first-child .csv-row-actions {
 .color-rules-save:hover {
     opacity: 0.9;
 }
+
+/* =========================================================================
+   Timetable (.timetable)
+   ========================================================================= */
+.tt-container { padding: 16px; }
+.tt-toolbar, .dt-toolbar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin-bottom: 12px; padding: 8px 12px;
+    background: var(--sidebar); border-radius: 8px;
+}
+.tt-toolbar-label { font-weight: 600; font-size: 13px; color: var(--text-secondary); }
+.tt-person-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 600; color: #fff; cursor: default;
+}
+.tt-person-remove {
+    cursor: pointer; font-size: 14px; line-height: 1;
+    opacity: 0.7; margin-left: 2px;
+}
+.tt-person-remove:hover { opacity: 1; }
+.tt-add-person-btn {
+    padding: 3px 12px; border-radius: 12px; border: 1.5px dashed var(--border);
+    background: transparent; color: var(--text-secondary);
+    font-size: 12px; cursor: pointer;
+}
+.tt-add-person-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.tt-scroll {
+    overflow: auto; max-height: calc(100vh - 160px);
+    border: 1px solid var(--border); border-radius: 8px;
+}
+.tt-table {
+    border-collapse: collapse; width: 100%; min-width: 800px;
+    font-size: 12px;
+}
+.tt-table th, .tt-table td {
+    border: 1px solid var(--border); text-align: center;
+    padding: 2px 4px; white-space: nowrap;
+}
+.tt-time-col {
+    width: 60px; position: sticky; left: 0; z-index: 2;
+    background: var(--sidebar); font-weight: 600;
+}
+.tt-day-header {
+    background: var(--sidebar); font-weight: 700; font-size: 13px;
+    padding: 6px 4px; position: sticky; top: 0; z-index: 3;
+}
+.tt-person-header {
+    background: var(--bg); font-weight: 600; font-size: 11px;
+    position: sticky; top: 30px; z-index: 3;
+}
+.tt-time-cell {
+    font-size: 11px; font-weight: 600; color: var(--text-secondary);
+    background: var(--sidebar); position: sticky; left: 0; z-index: 1;
+    width: 60px;
+}
+.tt-cell {
+    height: 24px; cursor: pointer; transition: background 0.1s;
+    min-width: 50px;
+}
+.tt-cell:hover { background: var(--accent-light, #e8f0fe); }
+.tt-cell.tt-empty { cursor: default; background: var(--sidebar); }
+.tt-block {
+    cursor: pointer; vertical-align: top; padding: 4px 6px;
+    text-align: left;
+}
+.tt-block:hover { filter: brightness(0.95); }
+.tt-block-label { font-size: 11px; font-weight: 600; }
+.tt-drag-active { background: var(--accent) !important; opacity: 0.3; }
+
+/* =========================================================================
+   Datetable (.datetable)
+   ========================================================================= */
+.dt-container { padding: 16px; }
+.dt-nav {
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; margin-bottom: 12px;
+}
+.dt-nav-title { font-size: 18px; font-weight: 700; min-width: 140px; text-align: center; }
+.dt-nav-btn {
+    padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--sidebar); cursor: pointer; font-size: 14px; color: var(--text);
+}
+.dt-nav-btn:hover { background: var(--border); }
+
+.dt-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr);
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.dt-dow {
+    padding: 8px; text-align: center; font-weight: 700; font-size: 13px;
+    background: var(--sidebar); border-bottom: 1px solid var(--border);
+}
+.dt-dow.dt-sun { color: #E67E73; }
+.dt-dow.dt-sat { color: #4A90D9; }
+
+.dt-cell {
+    min-height: 90px; padding: 6px; border: 1px solid var(--border);
+    cursor: pointer; transition: background 0.1s; position: relative;
+    vertical-align: top;
+}
+.dt-cell:hover { background: var(--accent-light, #f0f4ff); }
+.dt-cell.dt-empty { background: var(--sidebar); cursor: default; }
+.dt-cell.dt-empty:hover { background: var(--sidebar); }
+.dt-cell.dt-sun .dt-date-num { color: #E67E73; }
+.dt-cell.dt-sat .dt-date-num { color: #4A90D9; }
+.dt-cell.dt-today { background: #fffde7; }
+.dt-cell.dt-today:hover { background: #fff9c4; }
+
+.dt-date-num {
+    font-size: 13px; font-weight: 700; margin-bottom: 4px;
+}
+.dt-events { display: flex; flex-direction: column; gap: 2px; }
+.dt-event {
+    padding: 2px 6px; border-radius: 4px; font-size: 11px;
+    cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dt-event:hover { filter: brightness(0.9); }
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .tt-cell:hover { background: #2a3a4a; }
+    .dt-cell:hover { background: #2a3a4a; }
+    .dt-cell.dt-today { background: #3a3520; }
+    .dt-cell.dt-today:hover { background: #4a4530; }
+}
