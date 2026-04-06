@@ -236,9 +236,7 @@
         contextEl.style.top = y + 'px';
         const actions = [];
         actions.push({ label: '✏️ Rename', action: () => renameItem(item) });
-        if (item.type === 'file') {
-            actions.push({ label: '📥 Download', action: () => downloadFile(item.path) });
-        }
+        actions.push({ label: '📥 Download', action: () => downloadFile(item.path) });
         actions.push({ label: '🗑 Delete', cls: 'danger', action: () => deleteItem(item) });
         actions.forEach(({ label, cls, action }) => {
             const el = document.createElement('div');
@@ -265,10 +263,12 @@
             const res = await fetch(url, fetchOpts);
             if (!res.ok) throw new Error('Download failed');
             const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const fnameMatch = disposition.match(/filename="(.+?)"/);
             const objectUrl = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = objectUrl;
-            a.download = path.split('/').pop();
+            a.download = fnameMatch ? fnameMatch[1] : path.split('/').pop();
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -442,14 +442,35 @@
     }
 
     async function uploadFiles(filesWithPaths, targetDir) {
-        const totalSize = filesWithPaths.reduce((s, f) => s + f.file.size, 0);
-        const useChunked = filesWithPaths.some(f => f.file.size > CHUNKED_THRESHOLD);
+        // Separate empty-folder placeholders (file === null) from real files
+        const emptyDirs = filesWithPaths.filter(f => f.file === null);
+        const realFiles = filesWithPaths.filter(f => f.file !== null);
+
+        const totalSize = realFiles.reduce((s, f) => s + f.file.size, 0);
+        const useChunked = realFiles.some(f => f.file.size > CHUNKED_THRESHOLD);
         uploadAborted = false;
 
         try {
+            // Create empty directories first
+            for (const { relativePath } of emptyDirs) {
+                const dirPath = (targetDir ? targetDir + '/' : '') + relativePath.replace(/\/$/, '');
+                await fetch(`${BASE}/api/mkdir`, mutFetchOpts({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: dirPath }),
+                })).catch(() => {}); // ignore if already exists
+            }
+
+            if (realFiles.length === 0) {
+                // Only empty dirs, nothing else to upload
+                loadFinderGrid(currentFinderPath);
+                loadTree();
+                return;
+            }
+
             if (useChunked) {
                 let bytesSent = 0;
-                for (const { file, relativePath } of filesWithPaths) {
+                for (const { file, relativePath } of realFiles) {
                     if (uploadAborted) throw new Error('Upload cancelled');
                     const fname = relativePath || file.name;
                     if (file.size > CHUNKED_THRESHOLD) {
@@ -472,7 +493,7 @@
             } else {
                 // Small files: single request with XHR for progress
                 const form = new FormData();
-                for (const { file, relativePath } of filesWithPaths) {
+                for (const { file, relativePath } of realFiles) {
                     form.append('file', file, relativePath || file.name);
                 }
                 await new Promise((resolve, reject) => {
@@ -507,23 +528,34 @@
     function readEntryRecursive(entry) {
         return new Promise((resolve) => {
             if (entry.isFile) {
-                entry.file((f) => resolve([{ file: f, relativePath: entry.fullPath.replace(/^\//, '') }]));
+                entry.file(
+                    (f) => resolve([{ file: f, relativePath: entry.fullPath.replace(/^\//, '') }]),
+                    () => resolve([]) // error: skip unreadable file
+                );
             } else if (entry.isDirectory) {
+                const dirPath = entry.fullPath.replace(/^\//, '');
                 const reader = entry.createReader();
                 const allEntries = [];
                 const readBatch = () => {
-                    reader.readEntries(async (entries) => {
-                        if (entries.length === 0) {
-                            const results = [];
-                            for (const e of allEntries) {
-                                results.push(...await readEntryRecursive(e));
+                    reader.readEntries(
+                        async (entries) => {
+                            if (entries.length === 0) {
+                                const results = [];
+                                for (const e of allEntries) {
+                                    results.push(...await readEntryRecursive(e));
+                                }
+                                // If empty folder, add placeholder so server creates the directory
+                                if (results.length === 0) {
+                                    results.push({ file: null, relativePath: dirPath + '/' });
+                                }
+                                resolve(results);
+                            } else {
+                                allEntries.push(...entries);
+                                readBatch(); // readEntries may return partial results
                             }
-                            resolve(results);
-                        } else {
-                            allEntries.push(...entries);
-                            readBatch(); // readEntries may return partial results
-                        }
-                    });
+                        },
+                        () => resolve([]) // error: skip unreadable directory
+                    );
                 };
                 readBatch();
             } else {

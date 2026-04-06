@@ -1,10 +1,12 @@
 """Jupyter Notebook 6 server extension for Claude Notebook."""
 
+import io
 import json
 import os
 import re
 import time
 import uuid
+import zipfile
 from pathlib import Path
 
 from tornado import web
@@ -518,7 +520,7 @@ class WorkspaceRenameHandler(BaseHandler):
 
 
 class WorkspaceDownloadHandler(BaseHandler):
-    """Download a file as attachment (streaming for large files)."""
+    """Download a file or folder (as zip) as attachment."""
     @web.authenticated
     async def get(self):
         workspace = self.get_workspace()
@@ -526,21 +528,46 @@ class WorkspaceDownloadHandler(BaseHandler):
         if not file_path or not is_safe_path(workspace, file_path):
             raise web.HTTPError(400, "Invalid path")
         full_path = (workspace / file_path).resolve()
-        if not full_path.is_file():
+        if not full_path.exists():
             raise web.HTTPError(404, "Not found")
-        file_size = full_path.stat().st_size
-        self.set_header("Content-Type", "application/octet-stream")
-        self.set_header("Content-Disposition", f'attachment; filename="{full_path.name}"')
-        self.set_header("Content-Length", str(file_size))
-        chunk_size = 4 * 1024 * 1024  # 4 MB
-        with open(full_path, "rb") as f:
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                self.write(chunk)
-                await self.flush()
-        self.finish()
+
+        if full_path.is_dir():
+            # Folder download: stream as zip
+            self.set_header("Content-Type", "application/zip")
+            self.set_header("Content-Disposition",
+                            f'attachment; filename="{full_path.name}.zip"')
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, dirs, files in os.walk(full_path):
+                    root_path = Path(root)
+                    # Add empty directories
+                    if not files and not dirs:
+                        arcname = str(root_path.relative_to(full_path.parent)) + "/"
+                        zf.writestr(arcname, "")
+                    for fname in files:
+                        fpath = root_path / fname
+                        arcname = str(fpath.relative_to(full_path.parent))
+                        zf.write(fpath, arcname)
+            data = buf.getvalue()
+            self.set_header("Content-Length", str(len(data)))
+            self.write(data)
+            self.finish()
+        else:
+            # File download: streaming
+            file_size = full_path.stat().st_size
+            self.set_header("Content-Type", "application/octet-stream")
+            self.set_header("Content-Disposition",
+                            f'attachment; filename="{full_path.name}"')
+            self.set_header("Content-Length", str(file_size))
+            chunk_size = 4 * 1024 * 1024  # 4 MB
+            with open(full_path, "rb") as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    self.write(chunk)
+                    await self.flush()
+            self.finish()
 
 
 # ---------------------------------------------------------------------------
