@@ -284,8 +284,11 @@
                     el.innerHTML = `<div class="finder-item-icon">${icon}</div><div class="finder-item-name">${escHtml(item.name)}</div>`;
                     // Click: multi-select or navigate
                     el.addEventListener('click', (e) => {
+                        // Long-press flag set → already handled
+                        if (el._longPressed) { el._longPressed = false; return; }
                         if (e.ctrlKey || e.metaKey) {
                             // Toggle selection
+                            e.preventDefault();
                             if (selectedPaths.has(item.path)) {
                                 selectedPaths.delete(item.path);
                                 el.classList.remove('selected');
@@ -297,6 +300,7 @@
                             updateSelectionBar();
                         } else if (e.shiftKey && lastClickedIndex >= 0) {
                             // Range selection
+                            e.preventDefault();
                             const start = Math.min(lastClickedIndex, idx);
                             const end = Math.max(lastClickedIndex, idx);
                             for (let i = start; i <= end; i++) {
@@ -305,7 +309,7 @@
                             }
                             updateSelectionBar();
                         } else {
-                            // Normal click: if items are selected, clear selection
+                            // Normal click
                             if (selectedPaths.size > 0) {
                                 clearSelection();
                                 return;
@@ -317,6 +321,25 @@
                             }
                         }
                     });
+                    // Long-press: toggle selection (mobile-friendly)
+                    let longPressTimer = null;
+                    el.addEventListener('pointerdown', (e) => {
+                        longPressTimer = setTimeout(() => {
+                            longPressTimer = null;
+                            el._longPressed = true;
+                            if (selectedPaths.has(item.path)) {
+                                selectedPaths.delete(item.path);
+                                el.classList.remove('selected');
+                            } else {
+                                selectedPaths.add(item.path);
+                                el.classList.add('selected');
+                            }
+                            lastClickedIndex = idx;
+                            updateSelectionBar();
+                        }, 500);
+                    });
+                    el.addEventListener('pointerup', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+                    el.addEventListener('pointerleave', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
                     // Right-click: context menu
                     el.addEventListener('contextmenu', (e) => {
                         e.preventDefault();

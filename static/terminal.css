@@ -32,11 +32,13 @@ html, body {
     overscroll-behavior: none;
 }
 
-/* Layout */
+/* Layout — uses dvh so keyboard doesn't cause scroll.
+   env(keyboard-inset-height) adds bottom space when VirtualKeyboard API is active. */
 .layout {
     display: flex;
     height: 100vh;
     height: 100dvh;
+    padding-bottom: env(keyboard-inset-height, 0px);
 }
 
 /* Sidebar */

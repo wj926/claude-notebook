@@ -605,7 +605,7 @@ function setupResizeObserver() {
                     currentWs.send(JSON.stringify(["set_size", dims.rows, dims.cols]));
                 }
             }
-        }, 150);
+        }, 200);
     });
     resizeObserver.observe(terminalContainer);
 }
@@ -1341,46 +1341,57 @@ scrollbar.addEventListener('click', (e) => {
 // Update scrollbar periodically (fallback for edge cases)
 setInterval(updateScrollbar, 1000);
 
-// ========== KEYBOARD SCROLL PREVENTION ==========
-// Body is position:fixed, so any window scroll is unwanted.
-// We pin it at (0,0) and let visualViewport drive layout height.
+// ========== KEYBOARD / VIEWPORT MANAGEMENT ==========
+// Goal: prevent any body-level scroll when virtual keyboard appears.
+//
+// Strategy (layered, most-capable API first):
+//  1. VirtualKeyboard API (Chromium 94+) — keyboard overlays content,
+//     CSS env(keyboard-inset-height) handles spacing. No JS layout needed.
+//  2. visualViewport fallback — resize .layout to visual viewport height.
+//  3. Scroll pin — always keep window at (0,0).
 
 (function initKeyboardGuard() {
     const layout = document.querySelector('.layout');
 
-    // Pin body at (0,0) — single handler, no aggressive polling
+    // ---- VirtualKeyboard API (Chromium) ----
+    if ('virtualKeyboard' in navigator) {
+        navigator.virtualKeyboard.overlaysContent = true;
+        // CSS env(keyboard-inset-height) on .layout handles the rest.
+        // We still pin scroll as a safety net.
+    }
+
+    // ---- Scroll pin ----
+    // Body is position:fixed; any scrollY != 0 is a browser quirk.
     function pinScroll() {
         if (window.scrollY !== 0 || window.scrollX !== 0) {
-            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+            window.scrollTo(0, 0);
         }
     }
-    window.addEventListener('scroll', pinScroll, { passive: true });
+    // Use non-passive so we can act immediately
+    window.addEventListener('scroll', pinScroll);
 
-    // Prevent browser auto-scroll on focus
-    document.addEventListener('focus', (e) => {
-        const tag = e.target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') {
-            requestAnimationFrame(pinScroll);
-        }
-    }, true);
+    // On input focus, browsers may auto-scroll to the element.
+    // Undo that on the next frame.
+    document.addEventListener('focusin', () => {
+        requestAnimationFrame(pinScroll);
+    });
 
-    // Resize layout to visual viewport (keyboard-aware)
-    if (window.visualViewport) {
+    // ---- visualViewport fallback (for browsers without VirtualKeyboard API) ----
+    if (window.visualViewport && !('virtualKeyboard' in navigator)) {
         const vv = window.visualViewport;
         let rafId = null;
 
-        function adjustLayout() {
-            rafId = null;
-            if (layout) layout.style.height = Math.round(vv.height) + 'px';
-            pinScroll();
+        function onViewportChange() {
+            if (rafId) return;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                if (layout) layout.style.height = Math.round(vv.height) + 'px';
+                pinScroll();
+            });
         }
 
-        vv.addEventListener('resize', () => {
-            if (!rafId) rafId = requestAnimationFrame(adjustLayout);
-        });
-        vv.addEventListener('scroll', () => {
-            if (!rafId) rafId = requestAnimationFrame(adjustLayout);
-        });
+        vv.addEventListener('resize', onViewportChange);
+        vv.addEventListener('scroll', onViewportChange);
     }
 })();
 
