@@ -91,11 +91,16 @@
     const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'];
 
     // === Fetch helpers ===
+    // Normalize backslashes to forward slashes (Windows compat)
+    function normPath(p) { return p ? p.replace(/\\/g, '/') : p; }
+
     async function fetchTreeLevel(dirPath) {
         const url = dirPath ? `${BASE}/api/tree?path=${encodeURIComponent(dirPath)}` : `${BASE}/api/tree`;
         const res = await fetch(url, fetchOpts);
         if (!res.ok) throw new Error('Failed to load tree');
-        return res.json();
+        const items = await res.json();
+        items.forEach(item => { item.path = normPath(item.path); });
+        return items;
     }
 
     // === Sidebar tree (unchanged logic) ===

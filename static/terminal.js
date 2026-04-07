@@ -570,35 +570,42 @@ function setupWebSocket(name) {
 
 function setupResizeObserver() {
     let resizeTimer = null;
-    const resizeObserver = new ResizeObserver(() => {
+    let lastW = 0, lastH = 0;
+    const resizeObserver = new ResizeObserver((entries) => {
+        // Only refit when the terminal container actually changed size
+        const entry = entries[0];
+        const w = Math.round(entry.contentRect.width);
+        const h = Math.round(entry.contentRect.height);
+        if (w === lastW && h === lastH) return;
+        lastW = w; lastH = h;
+
         if (resizeTimer) clearTimeout(resizeTimer);
         resizeTimer = setTimeout(() => {
-            if (fitAddon && currentTerm) {
-                const viewport = terminalContainer.querySelector('.xterm-viewport');
-                const savedTop = viewport ? viewport.scrollTop : 0;
-                const wasAtBottom = viewport
-                    ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30
-                    : true;
-                fitAddon.fit();
-                // Restore scroll after fit recalculates viewport
-                if (viewport) {
-                    requestAnimationFrame(() => {
-                        if (wasAtBottom) {
-                            viewport.scrollTop = viewport.scrollHeight;
-                        } else {
-                            viewport.scrollTop = savedTop;
-                        }
-                        updateScrollbar();
-                    });
-                }
-                if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                    const dims = fitAddon.proposeDimensions();
-                    if (dims) {
-                        currentWs.send(JSON.stringify(["set_size", dims.rows, dims.cols]));
-                    }
+            if (!fitAddon || !currentTerm) return;
+            const viewport = terminalContainer.querySelector('.xterm-viewport');
+            const wasAtBottom = viewport
+                ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 30
+                : true;
+            const savedTop = viewport ? viewport.scrollTop : 0;
+
+            fitAddon.fit();
+
+            // Restore scroll position stably — single rAF, no flicker
+            if (viewport) {
+                requestAnimationFrame(() => {
+                    viewport.scrollTop = wasAtBottom
+                        ? viewport.scrollHeight
+                        : Math.min(savedTop, viewport.scrollHeight - viewport.clientHeight);
+                    updateScrollbar();
+                });
+            }
+            if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                const dims = fitAddon.proposeDimensions();
+                if (dims) {
+                    currentWs.send(JSON.stringify(["set_size", dims.rows, dims.cols]));
                 }
             }
-        }, 100);
+        }, 150);
     });
     resizeObserver.observe(terminalContainer);
 }
@@ -1331,60 +1338,46 @@ scrollbar.addEventListener('click', (e) => {
     viewport.scrollTop = clickRatio * (viewport.scrollHeight - viewport.clientHeight);
 });
 
-// Update scrollbar on scroll and content changes
-setInterval(updateScrollbar, 200);
+// Update scrollbar periodically (fallback for edge cases)
+setInterval(updateScrollbar, 1000);
 
 // ========== KEYBOARD SCROLL PREVENTION ==========
-// When the virtual keyboard opens, browsers scroll the focused element
-// into view. Since our layout is position:fixed and uses flex, this
-// body-level scroll is unwanted — it shifts the entire UI upward.
-//
-// Strategy:
-// 1. Kill any body scroll instantly (scroll event).
-// 2. On focus, use preventScroll and force scroll back.
-// 3. Use visualViewport to resize layout to visible area.
+// Body is position:fixed, so any window scroll is unwanted.
+// We pin it at (0,0) and let visualViewport drive layout height.
 
 (function initKeyboardGuard() {
     const layout = document.querySelector('.layout');
 
-    // --- 1. Unconditionally pin body at (0,0) ---
+    // Pin body at (0,0) — single handler, no aggressive polling
     function pinScroll() {
-        window.scrollTo(0, 0);
-        document.body.scrollTop = 0;
-        document.documentElement.scrollTop = 0;
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+            window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+        }
     }
     window.addEventListener('scroll', pinScroll, { passive: true });
 
-    // --- 2. Intercept focus on inputs to suppress auto-scroll ---
+    // Prevent browser auto-scroll on focus
     document.addEventListener('focus', (e) => {
         const tag = e.target.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') {
-            // Immediately undo any scroll the browser did
             requestAnimationFrame(pinScroll);
-            // Belt-and-suspenders: pin again after keyboard animation
-            setTimeout(pinScroll, 50);
-            setTimeout(pinScroll, 150);
-            setTimeout(pinScroll, 300);
         }
-    }, true); // capture phase — fires before browser scrolls
+    }, true);
 
-    // --- 3. VisualViewport layout adjustment ---
+    // Resize layout to visual viewport (keyboard-aware)
     if (window.visualViewport) {
         const vv = window.visualViewport;
-        let prevH = vv.height;
         let rafId = null;
 
         function adjustLayout() {
             rafId = null;
-            const h = Math.round(vv.height);
-            if (layout) layout.style.height = h + 'px';
+            if (layout) layout.style.height = Math.round(vv.height) + 'px';
             pinScroll();
         }
 
         vv.addEventListener('resize', () => {
             if (!rafId) rafId = requestAnimationFrame(adjustLayout);
         });
-        // Also listen for scroll (iOS shifts viewport when keyboard appears)
         vv.addEventListener('scroll', () => {
             if (!rafId) rafId = requestAnimationFrame(adjustLayout);
         });
