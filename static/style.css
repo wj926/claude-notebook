@@ -10,6 +10,7 @@
     --text-secondary: #9b9a97;
     --border: #e8e5e0;
     --accent: #2eaadc;
+    --accent-light: #e8f4fd;
     --code-bg: #f7f6f3;
     --blockquote-border: #e8e5e0;
     --blockquote-bg: #f7f6f3;
@@ -18,6 +19,15 @@
     --sidebar-max-width: 480px;
     --radius-sm: 6px;
     --radius-md: 8px;
+    /* Font stacks — keep a single source of truth so text renders
+       correctly on Windows (Korean via Malgun Gothic) and emojis render
+       in color across all platforms. */
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic',
+        'Apple SD Gothic Neo', 'Noto Sans KR', Roboto, 'Noto Sans', sans-serif,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
+    --font-mono: 'SFMono-Regular', 'Fira Code', 'JetBrains Mono', Menlo,
+        Consolas, 'Courier New', monospace,
+        'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 }
 
 /* ===== Unified thin scrollbars =====
@@ -51,10 +61,30 @@
 
 html, body {
     height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', sans-serif;
+    font-family: var(--font-sans);
     font-size: 16px;
     color: var(--text);
     background: var(--bg);
+}
+
+/* Keyboard focus ring — only shows for keyboard users, not mouse clicks.
+   Gives the app proper accessibility without noisy borders on click. */
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+button:focus-visible,
+.finder-btn:focus-visible,
+.preview-btn:focus-visible,
+.terminal-btn:focus-visible,
+.sidebar-toggle:focus-visible {
+    outline-offset: 2px;
+}
+.tree-item:focus-visible,
+.finder-item:focus-visible,
+.finder-detail-row:focus-visible {
+    outline-offset: -2px;
 }
 
 /* === Layout === */
@@ -263,14 +293,25 @@ html, body {
 .tree-item[data-depth="4"] { padding-left: 72px; }
 .tree-item[data-depth="5"] { padding-left: 88px; }
 
-/* === Divider (resizable) === */
+/* === Divider (resizable) ===
+   Thin visual line (4px) with a wider invisible hit target (10px total)
+   so it's easy to grab on both mouse and touch without visual noise. */
 .divider {
     width: 4px;
     cursor: col-resize;
     background: transparent;
     transition: background 0.2s;
+    position: relative;
+    flex-shrink: 0;
 }
-
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -3px;
+    right: -3px;
+}
 .divider:hover, .divider.active {
     background: var(--accent);
 }
@@ -727,7 +768,7 @@ html, body {
     padding: 2px 6px;
     border-radius: 4px;
     font-size: 0.9em;
-    font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
 }
 
 .markdown-body pre {
@@ -799,7 +840,7 @@ html, body {
 
 /* Non-markdown file display */
 .file-raw {
-    font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
     line-height: 1.6;
     white-space: pre-wrap;
@@ -833,7 +874,7 @@ html, body {
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 16px 20px;
-    font-family: 'SFMono-Regular', 'Fira Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 14px;
     line-height: 1.6;
     color: var(--text);
@@ -1487,7 +1528,7 @@ tr:first-child .csv-row-actions {
 .tt-toolbar, .dt-toolbar {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin-bottom: 12px; padding: 8px 12px;
-    background: var(--sidebar); border-radius: 8px;
+    background: var(--sidebar-bg); border-radius: 8px;
 }
 .tt-toolbar-label { font-weight: 600; font-size: 13px; color: var(--text-secondary); }
 .tt-person-tag {
@@ -1523,33 +1564,33 @@ tr:first-child .csv-row-actions {
 }
 .tt-time-col {
     width: 60px; position: sticky; left: 0; z-index: 4;
-    background: var(--sidebar); font-weight: 600;
+    background: var(--sidebar-bg); font-weight: 600;
 }
 .tt-day-header {
-    background: var(--sidebar); font-weight: 700; font-size: 13px;
+    background: var(--sidebar-bg); font-weight: 700; font-size: 13px;
     padding: 6px 4px; position: sticky; top: 0; z-index: 5;
     box-shadow: 0 1px 0 var(--border);
 }
 .tt-person-header {
-    background: var(--sidebar); font-weight: 600; font-size: 11px;
+    background: var(--sidebar-bg); font-weight: 600; font-size: 11px;
     position: sticky; top: 31px; z-index: 5;
     box-shadow: 0 1px 0 var(--border);
 }
 .tt-time-cell {
     font-size: 11px; font-weight: 600; color: var(--text-secondary);
-    background: var(--sidebar); position: sticky; left: 0; z-index: 1;
+    background: var(--sidebar-bg); position: sticky; left: 0; z-index: 1;
     width: 60px;
 }
 .tt-corner {
     position: sticky; left: 0; z-index: 6;
-    background: var(--sidebar);
+    background: var(--sidebar-bg);
 }
 .tt-cell {
     height: 24px; cursor: pointer; transition: background 0.1s;
     min-width: 50px;
 }
-.tt-cell:hover { background: var(--accent-light, #e8f0fe); }
-.tt-cell.tt-empty { cursor: default; background: var(--sidebar); }
+.tt-cell:hover { background: var(--accent-light); }
+.tt-cell.tt-empty { cursor: default; background: var(--sidebar-bg); }
 .tt-block {
     cursor: pointer; vertical-align: top; padding: 4px 6px;
     text-align: left;
@@ -1569,7 +1610,7 @@ tr:first-child .csv-row-actions {
 .dt-nav-title { font-size: 18px; font-weight: 700; min-width: 140px; text-align: center; }
 .dt-nav-btn {
     padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--sidebar); cursor: pointer; font-size: 14px; color: var(--text);
+    background: var(--sidebar-bg); cursor: pointer; font-size: 14px; color: var(--text);
 }
 .dt-nav-btn:hover { background: var(--border); }
 
@@ -1579,7 +1620,7 @@ tr:first-child .csv-row-actions {
 }
 .dt-dow {
     padding: 8px; text-align: center; font-weight: 700; font-size: 13px;
-    background: var(--sidebar); border-bottom: 1px solid var(--border);
+    background: var(--sidebar-bg); border-bottom: 1px solid var(--border);
 }
 .dt-dow.dt-sun { color: #E67E73; }
 .dt-dow.dt-sat { color: #4A90D9; }
@@ -1589,9 +1630,9 @@ tr:first-child .csv-row-actions {
     cursor: pointer; transition: background 0.1s; position: relative;
     vertical-align: top;
 }
-.dt-cell:hover { background: var(--accent-light, #f0f4ff); }
-.dt-cell.dt-empty { background: var(--sidebar); cursor: default; }
-.dt-cell.dt-empty:hover { background: var(--sidebar); }
+.dt-cell:hover { background: var(--accent-light); }
+.dt-cell.dt-empty { background: var(--sidebar-bg); cursor: default; }
+.dt-cell.dt-empty:hover { background: var(--sidebar-bg); }
 .dt-cell.dt-sun .dt-date-num { color: #E67E73; }
 .dt-cell.dt-sat .dt-date-num { color: #4A90D9; }
 .dt-cell.dt-today { background: #fffde7; }
@@ -1637,7 +1678,7 @@ tr:first-child .csv-row-actions {
 .dt-input-form {
     display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     margin-bottom: 12px; padding: 8px 12px;
-    background: var(--sidebar); border-radius: 8px;
+    background: var(--sidebar-bg); border-radius: 8px;
 }
 .dt-input {
     padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
@@ -1656,7 +1697,7 @@ tr:first-child .csv-row-actions {
 .dt-summary {
     margin-top: 20px; padding: 16px;
     border: 1px solid var(--border); border-radius: 8px;
-    background: var(--sidebar);
+    background: var(--sidebar-bg);
 }
 .dt-summary-title {
     font-size: 15px; font-weight: 700; margin-bottom: 12px;
