@@ -1046,6 +1046,13 @@
         }
         if (TIMETABLE_EXTS.includes(ext)) return JSON.stringify(_timetableData, null, 2);
         if (DATETABLE_EXTS.includes(ext)) return JSON.stringify(_datetableData, null, 2);
+        // Markdown: serialize the contenteditable DOM back to markdown so
+        // there's no need to ever swap to a textarea.
+        if (MD_EXTS.includes(ext)) {
+            const editor = previewBody.querySelector('.notion-editor');
+            if (editor) return domToMarkdown(editor);
+            return currentFileData.content;
+        }
         const ta = previewBody.querySelector('.edit-textarea');
         if (ta) return ta.value;
         return null;
@@ -1188,6 +1195,384 @@
         } catch {}
     });
 
+    // ========================================================================
+    // Notion-style markdown editor
+    // ========================================================================
+    // The rendered .markdown-body IS the editor. Clicking anywhere puts the
+    // caret there. Typing "works", including Notion's markdown shortcuts
+    // (`#`, `##`, `-`, `1.`, `>`, `---`, `[]` + space) which transform the
+    // current block in place. Auto-save reads the DOM through a home-grown
+    // HTML→Markdown serializer — there is no mode switch and no rendered ↔
+    // source asymmetry.
+    //
+    // Scope covers the subset marked.js produces: headings h1-h6, p, ul, ol,
+    // li (incl. task-list checkbox), blockquote, pre>code, hr, img, tables,
+    // and inline strong/em/code/del/a/br. Anything else falls through as
+    // textContent.
+
+    const BLOCK_TAGS = new Set([
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'blockquote', 'pre', 'ul', 'ol', 'li', 'hr', 'table', 'div',
+    ]);
+
+    /** Walk up from a node to the enclosing block element inside the editor. */
+    function closestBlock(node, editor) {
+        let n = node;
+        while (n && n !== editor) {
+            if (n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(n.tagName.toLowerCase())) {
+                return n;
+            }
+            n = n.parentNode;
+        }
+        return null;
+    }
+
+    function placeCaretAtStart(el) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+
+    // ---- Inline (recursive) HTML → Markdown ----
+    function inlineToMd(el) {
+        let out = '';
+        for (const node of el.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                out += node.textContent;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const tag = node.tagName.toLowerCase();
+                if (tag === 'br') { out += '  \n'; continue; }
+                if (tag === 'img') {
+                    const alt = node.getAttribute('alt') || '';
+                    const src = node.getAttribute('src') || '';
+                    out += `![${alt}](${src})`;
+                    continue;
+                }
+                const inner = inlineToMd(node);
+                switch (tag) {
+                    case 'strong': case 'b': out += inner.trim() ? `**${inner}**` : inner; break;
+                    case 'em': case 'i': out += inner.trim() ? `*${inner}*` : inner; break;
+                    case 'code': out += `\`${inner}\``; break;
+                    case 'del': case 's': case 'strike': out += `~~${inner}~~`; break;
+                    case 'a': {
+                        const href = node.getAttribute('href') || '';
+                        out += `[${inner}](${href})`;
+                        break;
+                    }
+                    case 'input':
+                        // task-list checkbox — handled by the containing <li>
+                        break;
+                    default:
+                        out += inner;
+                }
+            }
+        }
+        return out;
+    }
+
+    // ---- List → Markdown (supports nesting + task-list checkboxes) ----
+    function listToMd(ul, ordered, depth) {
+        const items = Array.from(ul.children).filter(c => c.tagName === 'LI');
+        const indent = '    '.repeat(depth); // 4 spaces per level keeps marked.js happy
+        return items.map((li, i) => {
+            const bullet = ordered ? `${i + 1}. ` : '- ';
+            // Task-list checkbox?
+            const cb = li.querySelector(':scope > input[type="checkbox"], :scope > p > input[type="checkbox"]');
+            const task = cb ? (cb.checked ? '[x] ' : '[ ] ') : '';
+            // Split li contents: the first paragraph/text is the item text;
+            // any nested ul/ol is recursively serialized and indented.
+            let textParts = [];
+            let nestedParts = [];
+            for (const child of li.childNodes) {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    textParts.push(child.textContent);
+                } else if (child.nodeType === Node.ELEMENT_NODE) {
+                    const tag = child.tagName.toLowerCase();
+                    if (tag === 'ul') nestedParts.push(listToMd(child, false, depth + 1));
+                    else if (tag === 'ol') nestedParts.push(listToMd(child, true, depth + 1));
+                    else if (tag === 'input' && child.type === 'checkbox') { /* consumed */ }
+                    else if (tag === 'p') textParts.push(inlineToMd(child));
+                    else textParts.push(inlineToMd(child));
+                }
+            }
+            const text = textParts.join('').replace(/^\s+|\s+$/g, '');
+            let line = indent + bullet + task + text;
+            if (nestedParts.length) line += '\n' + nestedParts.join('\n');
+            return line;
+        }).join('\n');
+    }
+
+    // ---- Table → Markdown (pipe table) ----
+    function tableToMd(table) {
+        const rows = Array.from(table.querySelectorAll('tr'));
+        if (rows.length === 0) return '';
+        const cellsOf = (tr) => Array.from(tr.children)
+            .filter(c => c.tagName === 'TH' || c.tagName === 'TD')
+            .map(c => inlineToMd(c).replace(/\|/g, '\\|').replace(/\n/g, ' '));
+        const header = cellsOf(rows[0]);
+        const sep = header.map(() => '---');
+        const body = rows.slice(1).map(cellsOf);
+        const toRow = (cells) => '| ' + cells.join(' | ') + ' |';
+        return [toRow(header), toRow(sep), ...body.map(toRow)].join('\n');
+    }
+
+    // ---- Single block → Markdown ----
+    function blockToMd(block) {
+        const tag = block.tagName.toLowerCase();
+        switch (tag) {
+            case 'h1': return '# ' + inlineToMd(block);
+            case 'h2': return '## ' + inlineToMd(block);
+            case 'h3': return '### ' + inlineToMd(block);
+            case 'h4': return '#### ' + inlineToMd(block);
+            case 'h5': return '##### ' + inlineToMd(block);
+            case 'h6': return '###### ' + inlineToMd(block);
+            case 'p': {
+                const txt = inlineToMd(block);
+                return txt;
+            }
+            case 'blockquote': {
+                // Serialize inner blocks then prefix each line with "> "
+                const inner = Array.from(block.childNodes)
+                    .map(n => {
+                        if (n.nodeType === Node.TEXT_NODE) return n.textContent;
+                        if (n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(n.tagName.toLowerCase())) {
+                            return blockToMd(n);
+                        }
+                        return n.nodeType === Node.ELEMENT_NODE ? inlineToMd(n) : '';
+                    })
+                    .filter(Boolean)
+                    .join('\n\n');
+                return inner.split('\n').map(l => '> ' + l).join('\n');
+            }
+            case 'pre': {
+                const code = block.querySelector('code');
+                const langMatch = code && code.className.match(/language-([\w-]+)/);
+                const lang = langMatch ? langMatch[1] : '';
+                const text = (code || block).textContent.replace(/\n$/, '');
+                return '```' + lang + '\n' + text + '\n```';
+            }
+            case 'ul': return listToMd(block, false, 0);
+            case 'ol': return listToMd(block, true, 0);
+            case 'hr': return '---';
+            case 'table': return tableToMd(block);
+            case 'div': case 'section': {
+                // Transparent: recurse
+                return Array.from(block.childNodes)
+                    .map(n => n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(n.tagName.toLowerCase())
+                        ? blockToMd(n)
+                        : (n.nodeType === Node.TEXT_NODE ? n.textContent : (n.nodeType === Node.ELEMENT_NODE ? inlineToMd(n) : '')))
+                    .filter(s => s.trim())
+                    .join('\n\n');
+            }
+            default: return inlineToMd(block);
+        }
+    }
+
+    /** Serialize the whole editor to Markdown. */
+    function domToMarkdown(editor) {
+        if (!editor) return '';
+        const parts = [];
+        for (const child of editor.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE) {
+                const t = child.textContent.replace(/^\s+|\s+$/g, '');
+                if (t) parts.push(t);
+            } else if (child.nodeType === Node.ELEMENT_NODE) {
+                if (BLOCK_TAGS.has(child.tagName.toLowerCase())) {
+                    parts.push(blockToMd(child));
+                } else {
+                    // stray inline at top level — wrap as paragraph
+                    const t = inlineToMd(child);
+                    if (t.trim()) parts.push(t);
+                }
+            }
+        }
+        // Collapse triple-blank-lines, ensure trailing newline
+        return parts.join('\n\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+    }
+
+    // ---- Markdown shortcut detection ----
+    // Patterns are matched against the block's leading text content when the
+    // user types a space. If any matches, we transform the block in place
+    // and strip the shortcut characters.
+    function detectBlockShortcut(text) {
+        if (text === '# ') return { tag: 'h1' };
+        if (text === '## ') return { tag: 'h2' };
+        if (text === '### ') return { tag: 'h3' };
+        if (text === '#### ') return { tag: 'h4' };
+        if (text === '##### ') return { tag: 'h5' };
+        if (text === '###### ') return { tag: 'h6' };
+        if (text === '- ' || text === '* ' || text === '+ ') return { list: 'ul' };
+        if (/^\d+\. $/.test(text)) return { list: 'ol' };
+        if (text === '> ' || text === '" ') return { tag: 'blockquote' };
+        if (text === '[] ' || text === '[ ] ') return { list: 'ul', task: false };
+        if (text === '[x] ' || text === '[X] ') return { list: 'ul', task: true };
+        if (text === '``` ') return { tag: 'pre' };
+        return null;
+    }
+
+    /** Try to convert the current block based on its leading shortcut chars.
+     *  Returns true if a transformation happened. */
+    function tryMarkdownShortcut(editor) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || !sel.isCollapsed) return false;
+        const range = sel.getRangeAt(0);
+        const block = closestBlock(range.startContainer, editor);
+        if (!block) return false;
+        // Only trigger for top-level paragraphs that the user just typed into
+        if (block.tagName.toLowerCase() !== 'p') return false;
+        const text = block.textContent;
+        const match = detectBlockShortcut(text);
+        if (!match) return false;
+
+        if (match.list) {
+            const list = document.createElement(match.list);
+            const li = document.createElement('li');
+            if (match.task !== undefined) {
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                if (match.task) cb.checked = true;
+                li.appendChild(cb);
+                li.appendChild(document.createTextNode(' '));
+            }
+            list.appendChild(li);
+            block.replaceWith(list);
+            placeCaretAtStart(li);
+        } else if (match.tag === 'pre') {
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            pre.appendChild(code);
+            block.replaceWith(pre);
+            placeCaretAtStart(code);
+        } else if (match.tag === 'blockquote') {
+            const bq = document.createElement('blockquote');
+            const p = document.createElement('p');
+            p.appendChild(document.createElement('br'));
+            bq.appendChild(p);
+            block.replaceWith(bq);
+            placeCaretAtStart(p);
+        } else {
+            const el = document.createElement(match.tag);
+            block.replaceWith(el);
+            placeCaretAtStart(el);
+        }
+        return true;
+    }
+
+    /** Handle `---` + Enter → horizontal rule, and Enter inside a heading
+     *  creates a fresh paragraph below rather than a duplicate heading. */
+    function tryEnterBehavior(editor, e) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return false;
+        const range = sel.getRangeAt(0);
+        const block = closestBlock(range.startContainer, editor);
+        if (!block) return false;
+
+        // --- → <hr>
+        if (block.tagName.toLowerCase() === 'p' && block.textContent === '---') {
+            e.preventDefault();
+            const hr = document.createElement('hr');
+            const after = document.createElement('p');
+            after.appendChild(document.createElement('br'));
+            block.replaceWith(hr);
+            hr.after(after);
+            placeCaretAtStart(after);
+            return true;
+        }
+
+        // Enter inside a heading → new <p> below
+        const tag = block.tagName.toLowerCase();
+        if (/^h[1-6]$/.test(tag)) {
+            // If caret is at the end of the heading, create a p instead of splitting
+            const atEnd = range.endOffset === (range.endContainer.nodeType === Node.TEXT_NODE
+                ? range.endContainer.length
+                : range.endContainer.childNodes.length);
+            if (atEnd) {
+                e.preventDefault();
+                const p = document.createElement('p');
+                p.appendChild(document.createElement('br'));
+                block.after(p);
+                placeCaretAtStart(p);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function wrapSelectionWithTag(tagName) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+        const el = document.createElement(tagName);
+        try {
+            el.appendChild(range.extractContents());
+            range.insertNode(el);
+            sel.removeAllRanges();
+            const r = document.createRange();
+            r.selectNodeContents(el);
+            sel.addRange(r);
+        } catch { /* range crossed block boundaries — ignore */ }
+    }
+
+    /** Wire a contenteditable markdown editor. */
+    function setupNotionEditor(editor) {
+        if (!editor) return;
+        editor.setAttribute('contenteditable', 'true');
+        editor.setAttribute('spellcheck', 'false');
+
+        // Markdown shortcut on space
+        editor.addEventListener('input', (e) => {
+            if (e.inputType === 'insertText' && e.data === ' ') {
+                tryMarkdownShortcut(editor);
+            }
+            scheduleSave();
+        });
+
+        editor.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                if (tryEnterBehavior(editor, e)) return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                editor.blur();
+                flushSave();
+                return;
+            }
+            const mod = e.ctrlKey || e.metaKey;
+            if (!mod) return;
+            const k = e.key.toLowerCase();
+            if (k === 'b') {
+                e.preventDefault();
+                document.execCommand('bold');
+                scheduleSave();
+            } else if (k === 'i') {
+                e.preventDefault();
+                document.execCommand('italic');
+                scheduleSave();
+            } else if (k === 'e') {
+                e.preventDefault();
+                wrapSelectionWithTag('code');
+                scheduleSave();
+            } else if (k === 's') {
+                e.preventDefault();
+                flushSave();
+            }
+        });
+
+        // Save on blur too (belt and suspenders)
+        editor.addEventListener('blur', () => { flushSave(); });
+
+        // Paste: strip rich HTML formatting, paste as plain text. Users who
+        // paste from Word/Notion/etc. won't inherit wild inline styles.
+        editor.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+            if (text) document.execCommand('insertText', false, text);
+        });
+    }
+
     async function renderPreviewMode(data) {
         isInlineEditing = false;
         const isCsv = CSV_EXTS.includes(data.extension);
@@ -1201,11 +1586,16 @@
         } else if (DATETABLE_EXTS.includes(data.extension)) {
             renderDatetable(data.content, data.path, { initial: true });
         } else if (MD_EXTS.includes(data.extension) && typeof marked !== 'undefined') {
-            previewBody.innerHTML = `<div class="markdown-body editable-hint">${marked.parse(data.content)}</div>`;
+            // Rendered markdown IS the editor — no textarea swap, no mode flip
+            previewBody.innerHTML = `<div class="markdown-body notion-editor">${marked.parse(data.content)}</div>`;
             if (typeof hljs !== 'undefined') {
                 previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
             }
-            attachClickToEdit(previewBody.querySelector('.markdown-body'));
+            const editor = previewBody.querySelector('.notion-editor');
+            setupNotionEditor(editor);
+            // Use the serialized form as baseline so no-op opens don't dirty
+            // the file just because the round-trip isn't byte-identical.
+            lastSavedContent = domToMarkdown(editor);
         } else if (EDITABLE_EXTS.includes(data.extension)) {
             previewBody.innerHTML = `<pre class="file-raw editable-hint">${escHtml(data.content)}</pre>`;
             attachClickToEdit(previewBody.querySelector('.file-raw'));
@@ -1215,7 +1605,8 @@
     }
 
     /** Attach a single-click listener that swaps the rendered view for the
-     *  inline textarea. Used for markdown and file-raw containers. */
+     *  inline textarea. Used for non-markdown editable file types
+     *  (code/text), which don't make sense as a WYSIWYG editor. */
     function attachClickToEdit(el) {
         if (!el) return;
         el.addEventListener('click', (e) => {

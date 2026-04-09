@@ -924,15 +924,64 @@ button:focus-visible,
 }
 .edit-textarea:focus { outline: none; }
 
-/* Click-to-edit hover affordance on rendered preview */
-.markdown-body.editable-hint,
+/* Click-to-edit hover affordance (only for non-markdown files that still
+   use the textarea swap). Markdown bodies are edited in place, so they
+   don't get the hover tint — otherwise the editor flashes on every click. */
 .file-raw.editable-hint {
     cursor: text;
     transition: background 0.15s;
 }
-.markdown-body.editable-hint:hover,
 .file-raw.editable-hint:hover {
     background: rgba(46, 170, 220, 0.03);
+}
+
+/* === Notion-style markdown editor ===
+   The rendered .markdown-body is contenteditable. All base type styles
+   from .markdown-body still apply; this block only layers on focus
+   affordances and empty-state placeholders. */
+.markdown-body.notion-editor {
+    cursor: text;
+    outline: none;
+    caret-color: var(--accent);
+    min-height: calc(100vh - 220px);
+    padding-bottom: 40vh; /* lots of room to click below the last block */
+}
+.markdown-body.notion-editor:focus,
+.markdown-body.notion-editor *:focus {
+    outline: none;
+}
+/* Empty paragraph / heading placeholder — Notion convention.
+   When a block is empty and currently focused, show a faint hint. */
+.markdown-body.notion-editor p:empty::before,
+.markdown-body.notion-editor h1:empty::before,
+.markdown-body.notion-editor h2:empty::before,
+.markdown-body.notion-editor h3:empty::before,
+.markdown-body.notion-editor h4:empty::before,
+.markdown-body.notion-editor h5:empty::before,
+.markdown-body.notion-editor h6:empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-secondary);
+    opacity: 0.45;
+    pointer-events: none;
+}
+.markdown-body.notion-editor h1:empty::before { content: '제목 1'; }
+.markdown-body.notion-editor h2:empty::before { content: '제목 2'; }
+.markdown-body.notion-editor h3:empty::before { content: '제목 3'; }
+.markdown-body.notion-editor p:empty::before { content: ''; }
+/* A tiny left-margin sliver that subtly signals "you can type here",
+   visible only on hover, without redecorating every block. */
+.markdown-body.notion-editor > *:hover {
+    position: relative;
+}
+/* Inline code inside the editor — keep the marked.js style but make sure
+   the caret still shows inside it. */
+.markdown-body.notion-editor code {
+    caret-color: var(--text);
+}
+/* Task-list checkboxes: interactive even while editing */
+.markdown-body.notion-editor li input[type="checkbox"] {
+    cursor: pointer;
+    margin-right: 6px;
 }
 
 /* === Snapshot history modal === */
