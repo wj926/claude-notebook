@@ -884,18 +884,13 @@ button:focus-visible,
     flex-shrink: 0;
 }
 .preview-status[data-state="idle"] { display: none; }
-/* Word count — small pill right of the save status */
-.preview-word-count {
-    display: flex;
-    align-items: center;
-    height: 28px;
+/* Text-label variant of .preview-btn (e.g. Markdown ↔ Text toggle) */
+.preview-btn-text {
+    width: auto;
     padding: 0 10px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
-    color: var(--text-secondary);
     letter-spacing: 0.2px;
-    user-select: none;
-    font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 .preview-status[data-state="saved"]::after { content: '저장됨'; }

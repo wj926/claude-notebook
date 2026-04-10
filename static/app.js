@@ -19,7 +19,7 @@
     const previewClose = document.getElementById('previewClose');
     const previewDownload = document.getElementById('previewDownload');
     const previewStatus = document.getElementById('previewStatus');
-    const previewWordCount = document.getElementById('previewWordCount');
+    const previewViewToggle = document.getElementById('previewViewToggle');
     const previewHistory = document.getElementById('previewHistory');
     const previewHelp = document.getElementById('previewHelp');
     const previewColorRules = document.getElementById('previewColorRules');
@@ -54,6 +54,8 @@
     let currentSnapshots = [];
     let selectedSnapshotTs = null;
     let selectedSnapshotContent = null;
+    // Markdown preview view mode: 'rendered' (Notion editor) | 'text' (raw <pre>)
+    let _mdViewMode = 'rendered';
 
     // === Sidebar toggle ===
     function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
@@ -992,7 +994,12 @@
         finder.style.display = 'none';
         previewHistory.style.display = 'none';
         previewHelp.style.display = 'none';
-        if (previewWordCount) { previewWordCount.textContent = ''; previewWordCount.style.display = 'none'; }
+        if (previewViewToggle) {
+            previewViewToggle.style.display = 'none';
+            previewViewToggle.textContent = 'Text';
+            previewViewToggle.title = 'Switch to plain text view';
+        }
+        _mdViewMode = 'rendered';
         previewColorRules.style.display = 'none';
         loadPreviewContent(path);
         updateHash(path);
@@ -1014,7 +1021,12 @@
         lastSavedContent = null;
         previewHistory.style.display = 'none';
         previewHelp.style.display = 'none';
-        if (previewWordCount) { previewWordCount.textContent = ''; previewWordCount.style.display = 'none'; }
+        if (previewViewToggle) {
+            previewViewToggle.style.display = 'none';
+            previewViewToggle.textContent = 'Text';
+            previewViewToggle.title = 'Switch to plain text view';
+        }
+        _mdViewMode = 'rendered';
         previewColorRules.style.display = 'none';
         setSaveStatus('idle');
         updateHash(currentPath);
@@ -2990,24 +3002,48 @@
         if (block) block.classList.add('has-caret');
     }
 
-    // ==================== Word count ====================
-    let _wordCountTimer = null;
-    function updateWordCount(editor) {
-        if (_wordCountTimer) clearTimeout(_wordCountTimer);
-        _wordCountTimer = setTimeout(() => {
-            if (!previewWordCount) return;
-            const text = (editor.textContent || '').trim();
-            if (!text) {
-                previewWordCount.textContent = '';
-                previewWordCount.style.display = 'none';
-                return;
+    // ==================== Markdown view mode (rendered ↔ text) ====================
+    // 'rendered' = Notion-like editor (default). 'text' = raw markdown source as <pre>.
+    // `_mdViewMode` is declared at the top of the IIFE alongside other preview state.
+
+    function setMarkdownViewMode(mode) {
+        if (!currentFileData || !MD_EXTS.includes(currentFileData.extension)) return;
+        if (mode === _mdViewMode) return;
+        if (mode === 'text') {
+            // Capture any unsaved edits from the live editor before swapping out.
+            const editor = previewBody.querySelector('.notion-editor');
+            if (editor) currentFileData.content = domToMarkdown(editor);
+            previewBody.innerHTML = `<pre class="file-raw">${escHtml(currentFileData.content)}</pre>`;
+            _mdViewMode = 'text';
+            if (previewViewToggle) {
+                previewViewToggle.textContent = 'Markdown';
+                previewViewToggle.title = 'Switch to rendered Markdown view';
             }
-            // Word count: split on whitespace; character count: raw length
-            const words = text.split(/\s+/).filter(Boolean).length;
-            const chars = text.length;
-            previewWordCount.textContent = `${words.toLocaleString()} 단어 · ${chars.toLocaleString()}자`;
-            previewWordCount.style.display = '';
-        }, 250);
+        } else {
+            // Re-render the markdown editor from the latest content.
+            previewBody.innerHTML = `<div class="markdown-body notion-editor">${marked.parse(currentFileData.content)}</div>`;
+            if (typeof hljs !== 'undefined') {
+                previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+            }
+            const editor = previewBody.querySelector('.notion-editor');
+            setupNotionEditor(editor);
+            rehydrateMathBlocks(editor);
+            rehydrateTOCBlocks(editor);
+            // Re-baseline lastSavedContent against the round-tripped form so a no-op
+            // toggle doesn't dirty the file.
+            lastSavedContent = domToMarkdown(editor);
+            _mdViewMode = 'rendered';
+            if (previewViewToggle) {
+                previewViewToggle.textContent = 'Text';
+                previewViewToggle.title = 'Switch to plain text view';
+            }
+        }
+    }
+
+    if (previewViewToggle) {
+        previewViewToggle.addEventListener('click', () => {
+            setMarkdownViewMode(_mdViewMode === 'rendered' ? 'text' : 'rendered');
+        });
     }
 
     // ==================== Keyboard help modal ====================
@@ -3533,7 +3569,6 @@
                 // Inline math on closing $
                 if (e.data === '$') tryInlineMath(editor);
             }
-            updateWordCount(editor);
             scheduleSave();
         });
 
@@ -3752,8 +3787,13 @@
             // Rehydrate math blocks (KaTeX re-render) and TOC click handlers
             rehydrateMathBlocks(editor);
             rehydrateTOCBlocks(editor);
-            // Initial word count display
-            updateWordCount(editor);
+            // Show the MD ↔ Text view toggle for markdown files.
+            if (previewViewToggle) {
+                previewViewToggle.style.display = '';
+                previewViewToggle.textContent = 'Text';
+                previewViewToggle.title = 'Switch to plain text view';
+            }
+            _mdViewMode = 'rendered';
             // Use the serialized form as baseline so no-op opens don't dirty
             // the file just because the round-trip isn't byte-identical.
             lastSavedContent = domToMarkdown(editor);
