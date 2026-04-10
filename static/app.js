@@ -1213,6 +1213,7 @@
     const BLOCK_TAGS = new Set([
         'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
         'blockquote', 'pre', 'ul', 'ol', 'li', 'hr', 'table', 'div',
+        'details',
     ]);
 
     /** Walk up from a node to the enclosing block element inside the editor. */
@@ -1257,6 +1258,11 @@
                     case 'em': case 'i': out += inner.trim() ? `*${inner}*` : inner; break;
                     case 'code': out += `\`${inner}\``; break;
                     case 'del': case 's': case 'strike': out += `~~${inner}~~`; break;
+                    case 'u':
+                        // Underline has no standard markdown — fall back to
+                        // inline HTML which marked.js passes through.
+                        out += `<u>${inner}</u>`;
+                        break;
                     case 'a': {
                         const href = node.getAttribute('href') || '';
                         out += `[${inner}](${href})`;
@@ -1358,6 +1364,25 @@
             case 'ol': return listToMd(block, true, 0);
             case 'hr': return '---';
             case 'table': return tableToMd(block);
+            case 'details': {
+                // Toggle block — preserved as inline HTML since markdown
+                // has no standard toggle syntax. marked.js passes HTML
+                // through so the block re-renders correctly next open.
+                const summary = block.querySelector(':scope > summary');
+                const summaryMd = summary ? inlineToMd(summary) : '';
+                const body = Array.from(block.childNodes)
+                    .filter(n => n !== summary)
+                    .map(n => {
+                        if (n.nodeType === Node.TEXT_NODE) return n.textContent.trim();
+                        if (n.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(n.tagName.toLowerCase())) {
+                            return blockToMd(n);
+                        }
+                        return n.nodeType === Node.ELEMENT_NODE ? inlineToMd(n) : '';
+                    })
+                    .filter(Boolean)
+                    .join('\n\n');
+                return `<details>\n<summary>${summaryMd}</summary>\n\n${body}\n\n</details>`;
+            }
             case 'div': case 'section': {
                 // Transparent: recurse
                 return Array.from(block.childNodes)
@@ -1516,14 +1541,497 @@
         } catch { /* range crossed block boundaries — ignore */ }
     }
 
+    // ========================================================================
+    // Notion parity Phase 1
+    //   • Slash menu (/)  — caret-based block picker
+    //   • Selection toolbar — floating format bar on text selection
+    //   • Block menu (Cmd+/, right-click) — caret/mouse-driven block ops
+    //   • Link input (Cmd+K) — floating URL input
+    //   • Cmd+Option+0..8 — quick block type shortcuts
+    //   • Cmd+U / Cmd+Shift+S — underline / strikethrough
+    //   • Cmd+D / Cmd+Shift+↑↓ — duplicate / move block
+    // ------------------------------------------------------------------------
+    // Everything is single-contenteditable friendly: no per-block hover
+    // overlays, no drag handles. All floating UI is positioned from caret or
+    // selection rects and tracks no block DOM structure.
+    // ========================================================================
+
+    /** Turn the given top-level block element into a different block type.
+     *  Preserves content where possible. */
+    function convertBlockTo(editor, block, kind) {
+        if (!block) return;
+        const inner = block.innerHTML || '<br>';
+        const text = block.textContent || '';
+
+        // Special kinds that aren't single-tag swaps
+        if (kind === 'ul' || kind === 'ol') {
+            const list = document.createElement(kind);
+            const li = document.createElement('li');
+            li.innerHTML = inner === '<br>' ? '' : inner;
+            list.appendChild(li);
+            block.replaceWith(list);
+            placeCaretAtStart(li);
+            return list;
+        }
+        if (kind === 'todo') {
+            const list = document.createElement('ul');
+            const li = document.createElement('li');
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            li.appendChild(cb);
+            li.appendChild(document.createTextNode(' '));
+            const span = document.createElement('span');
+            span.innerHTML = inner === '<br>' ? '' : inner;
+            li.appendChild(span);
+            list.appendChild(li);
+            block.replaceWith(list);
+            placeCaretAtStart(span);
+            return list;
+        }
+        if (kind === 'toggle') {
+            const details = document.createElement('details');
+            details.open = true;
+            const summary = document.createElement('summary');
+            summary.innerHTML = inner === '<br>' ? '' : inner;
+            details.appendChild(summary);
+            const body = document.createElement('p');
+            body.appendChild(document.createElement('br'));
+            details.appendChild(body);
+            block.replaceWith(details);
+            placeCaretAtStart(summary);
+            return details;
+        }
+        if (kind === 'pre') {
+            const pre = document.createElement('pre');
+            const code = document.createElement('code');
+            code.textContent = text;
+            pre.appendChild(code);
+            block.replaceWith(pre);
+            placeCaretAtStart(code);
+            return pre;
+        }
+        if (kind === 'hr') {
+            const hr = document.createElement('hr');
+            const p = document.createElement('p');
+            p.appendChild(document.createElement('br'));
+            block.replaceWith(hr);
+            hr.after(p);
+            placeCaretAtStart(p);
+            return hr;
+        }
+        // Simple tag swap (p, h1-h6, blockquote)
+        const el = document.createElement(kind);
+        el.innerHTML = inner === '<br>' ? '<br>' : inner;
+        block.replaceWith(el);
+        placeCaretAtStart(el);
+        return el;
+    }
+
+    /** Convert the block the caret is currently inside. */
+    function convertCurrentBlock(editor, kind) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return;
+        const block = closestBlock(sel.getRangeAt(0).startContainer, editor);
+        if (block) convertBlockTo(editor, block, kind);
+    }
+
+    // Block type definitions shared by slash menu, Cmd+Option+N, and block menu
+    const NOTION_BLOCKS = [
+        { key: 'text',   label: '텍스트',     aliases: ['text', 'p', 'plain', 'para'],           icon: '📝', shortcut: '⌘⌥0', kind: 'p' },
+        { key: 'h1',     label: '제목 1',     aliases: ['h1', 'heading1', 'title', '#'],         icon: 'H1', shortcut: '⌘⌥1', kind: 'h1' },
+        { key: 'h2',     label: '제목 2',     aliases: ['h2', 'heading2', '##'],                 icon: 'H2', shortcut: '⌘⌥2', kind: 'h2' },
+        { key: 'h3',     label: '제목 3',     aliases: ['h3', 'heading3', '###'],                icon: 'H3', shortcut: '⌘⌥3', kind: 'h3' },
+        { key: 'todo',   label: '할 일 목록', aliases: ['todo', 'task', 'check', '[]'],          icon: '☑',  shortcut: '⌘⌥4', kind: 'todo' },
+        { key: 'ul',     label: '글머리 기호', aliases: ['bullet', 'ul', 'list', 'unordered'],   icon: '•',  shortcut: '⌘⌥5', kind: 'ul' },
+        { key: 'ol',     label: '번호 매기기', aliases: ['number', 'ol', 'ordered'],             icon: '1.', shortcut: '⌘⌥6', kind: 'ol' },
+        { key: 'toggle', label: '토글',        aliases: ['toggle', 'details', 'collapse'],       icon: '▸',  shortcut: '⌘⌥7', kind: 'toggle' },
+        { key: 'quote',  label: '인용',        aliases: ['quote', 'blockquote', '"'],            icon: '❝',  shortcut: '',    kind: 'blockquote' },
+        { key: 'code',   label: '코드',        aliases: ['code', 'pre', '```'],                  icon: '⟨⟩', shortcut: '⌘⌥8', kind: 'pre' },
+        { key: 'hr',     label: '구분선',      aliases: ['divider', 'hr', '---'],                icon: '—',  shortcut: '',    kind: 'hr' },
+    ];
+    // Cmd+Option+0..8 map
+    const BLOCK_KEY_SHORTCUTS = {
+        '0': 'p', '1': 'h1', '2': 'h2', '3': 'h3',
+        '4': 'todo', '5': 'ul', '6': 'ol', '7': 'toggle', '8': 'pre',
+    };
+
+    // ==================== Slash menu ====================
+    let _slashState = null; // { editor, block, anchorOffset, el, filter, index }
+
+    function openSlashMenu(editor) {
+        closeSlashMenu();
+        const sel = window.getSelection();
+        if (!sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        const block = closestBlock(range.startContainer, editor);
+        if (!block) return;
+        const rect = range.getBoundingClientRect();
+        const el = document.createElement('div');
+        el.className = 'slash-menu';
+        el.style.position = 'fixed';
+        el.style.left = Math.round(rect.left) + 'px';
+        el.style.top = Math.round(rect.bottom + 6) + 'px';
+        el.style.zIndex = '5000';
+        document.body.appendChild(el);
+
+        _slashState = { editor, block, el, filter: '', index: 0 };
+        renderSlashMenu();
+        // If the menu overflows the viewport, nudge up
+        const r = el.getBoundingClientRect();
+        if (r.bottom > window.innerHeight - 8) {
+            el.style.top = Math.round(rect.top - r.height - 6) + 'px';
+        }
+    }
+    function closeSlashMenu() {
+        if (_slashState && _slashState.el) _slashState.el.remove();
+        _slashState = null;
+    }
+    function slashMenuFilteredItems() {
+        if (!_slashState) return [];
+        const f = _slashState.filter.toLowerCase();
+        if (!f) return NOTION_BLOCKS;
+        return NOTION_BLOCKS.filter(b =>
+            b.label.toLowerCase().includes(f) ||
+            b.aliases.some(a => a.startsWith(f))
+        );
+    }
+    function renderSlashMenu() {
+        if (!_slashState) return;
+        const items = slashMenuFilteredItems();
+        if (_slashState.index >= items.length) _slashState.index = 0;
+        _slashState.el.innerHTML = items.length === 0
+            ? '<div class="sm-empty">일치하는 블록 없음</div>'
+            : `<div class="sm-header">블록 선택${_slashState.filter ? ' — /' + escHtml(_slashState.filter) : ''}</div>` +
+              items.map((b, i) => `
+                <div class="sm-item ${i === _slashState.index ? 'active' : ''}" data-key="${b.key}">
+                    <span class="sm-icon">${b.icon}</span>
+                    <span class="sm-label">${escHtml(b.label)}</span>
+                    ${b.shortcut ? `<span class="sm-shortcut">${escHtml(b.shortcut)}</span>` : ''}
+                </div>
+              `).join('');
+        _slashState.el.querySelectorAll('.sm-item').forEach((el, i) => {
+            el.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                _slashState.index = i;
+                commitSlashMenu();
+            });
+            el.addEventListener('mouseenter', () => {
+                _slashState.index = i;
+                _slashState.el.querySelectorAll('.sm-item').forEach(x => x.classList.remove('active'));
+                el.classList.add('active');
+            });
+        });
+    }
+    function commitSlashMenu() {
+        if (!_slashState) return;
+        const items = slashMenuFilteredItems();
+        const item = items[_slashState.index];
+        if (!item) { closeSlashMenu(); return; }
+        const { editor, block } = _slashState;
+        // Strip the "/filter" from the block's text before converting
+        stripSlashQueryFromBlock(block, _slashState.filter);
+        closeSlashMenu();
+        convertBlockTo(editor, block, item.kind);
+        scheduleSave();
+    }
+    function stripSlashQueryFromBlock(block, filter) {
+        // Remove the "/" plus the filter text at the end of the block's
+        // textContent. We walk text nodes from the end to avoid clobbering
+        // inline formatting elsewhere in the block.
+        const target = '/' + filter;
+        const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        let remaining = target.length;
+        for (let i = nodes.length - 1; i >= 0 && remaining > 0; i--) {
+            const n = nodes[i];
+            const len = n.textContent.length;
+            if (len >= remaining) {
+                n.textContent = n.textContent.slice(0, len - remaining);
+                remaining = 0;
+            } else {
+                n.textContent = '';
+                remaining -= len;
+            }
+        }
+    }
+
+    /** Handle keyboard events while the slash menu is open.
+     *  Returns true if the event was consumed. */
+    function handleSlashMenuKey(e) {
+        if (!_slashState) return false;
+        if (e.key === 'Escape') { e.preventDefault(); closeSlashMenu(); return true; }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const items = slashMenuFilteredItems();
+            _slashState.index = (_slashState.index + 1) % Math.max(1, items.length);
+            renderSlashMenu();
+            return true;
+        }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const items = slashMenuFilteredItems();
+            _slashState.index = (_slashState.index - 1 + items.length) % Math.max(1, items.length);
+            renderSlashMenu();
+            return true;
+        }
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            commitSlashMenu();
+            return true;
+        }
+        return false;
+    }
+
+    /** After each input event, refresh the slash menu filter (or close
+     *  it if the "/" was deleted). */
+    function updateSlashMenuFilter(editor) {
+        if (!_slashState) return;
+        const sel = window.getSelection();
+        if (!sel.rangeCount) { closeSlashMenu(); return; }
+        const block = closestBlock(sel.getRangeAt(0).startContainer, editor);
+        if (block !== _slashState.block) { closeSlashMenu(); return; }
+        const text = block.textContent;
+        const slashIdx = text.lastIndexOf('/');
+        if (slashIdx === -1) { closeSlashMenu(); return; }
+        const after = text.slice(slashIdx + 1);
+        // Slash must not contain spaces (to let users type "/ foo" literally if
+        // they escape out)
+        if (after.includes(' ')) { closeSlashMenu(); return; }
+        _slashState.filter = after;
+        _slashState.index = 0;
+        renderSlashMenu();
+    }
+
+    // ==================== Selection toolbar ====================
+    let _selToolbarEl = null;
+
+    function ensureSelectionToolbar() {
+        if (_selToolbarEl) return _selToolbarEl;
+        const el = document.createElement('div');
+        el.className = 'selection-toolbar';
+        el.innerHTML = `
+            <button data-cmd="bold" title="Bold (⌘B)"><b>B</b></button>
+            <button data-cmd="italic" title="Italic (⌘I)"><i>I</i></button>
+            <button data-cmd="underline" title="Underline (⌘U)"><u>U</u></button>
+            <button data-cmd="strike" title="Strike (⌘⇧S)"><s>S</s></button>
+            <button data-cmd="code" title="Code (⌘E)">&lt;/&gt;</button>
+            <button data-cmd="link" title="Link (⌘K)">🔗</button>
+        `;
+        // Use mousedown so we can preventDefault before the selection is lost
+        el.addEventListener('mousedown', (e) => {
+            const btn = e.target.closest('button');
+            if (!btn) return;
+            e.preventDefault();
+            applyInlineFormat(btn.dataset.cmd);
+        });
+        el.style.position = 'fixed';
+        el.style.zIndex = '5000';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+        _selToolbarEl = el;
+        return el;
+    }
+    function hideSelectionToolbar() {
+        if (_selToolbarEl) _selToolbarEl.style.display = 'none';
+    }
+    function updateSelectionToolbar(editor) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) { hideSelectionToolbar(); return; }
+        const range = sel.getRangeAt(0);
+        if (!editor.contains(range.commonAncestorContainer)) { hideSelectionToolbar(); return; }
+        const rect = range.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) { hideSelectionToolbar(); return; }
+        const tb = ensureSelectionToolbar();
+        tb.style.display = 'flex';
+        // Measure first so we can center on selection
+        const tbRect = tb.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - tbRect.width / 2;
+        let top = rect.top - tbRect.height - 8;
+        // Keep inside viewport
+        if (left < 8) left = 8;
+        if (left + tbRect.width > window.innerWidth - 8) {
+            left = window.innerWidth - tbRect.width - 8;
+        }
+        if (top < 8) top = rect.bottom + 8; // flip below selection
+        tb.style.left = Math.round(left) + 'px';
+        tb.style.top = Math.round(top) + 'px';
+    }
+
+    function applyInlineFormat(cmd) {
+        switch (cmd) {
+            case 'bold':      document.execCommand('bold'); break;
+            case 'italic':    document.execCommand('italic'); break;
+            case 'underline': document.execCommand('underline'); break;
+            case 'strike':    document.execCommand('strikeThrough'); break;
+            case 'code':      wrapSelectionWithTag('code'); break;
+            case 'link':      openLinkInput(); return; // schedules save itself
+        }
+        scheduleSave();
+    }
+
+    // ==================== Link input (floating) ====================
+    function openLinkInput() {
+        const sel = window.getSelection();
+        if (!sel.rangeCount || sel.isCollapsed) return;
+        const savedRange = sel.getRangeAt(0).cloneRange();
+        const rect = savedRange.getBoundingClientRect();
+
+        // Check if the selection is already inside an existing link
+        let existingA = savedRange.startContainer;
+        while (existingA && existingA !== document.body) {
+            if (existingA.nodeType === Node.ELEMENT_NODE && existingA.tagName === 'A') break;
+            existingA = existingA.parentNode;
+        }
+        const currentUrl = (existingA && existingA.tagName === 'A') ? (existingA.getAttribute('href') || '') : '';
+
+        const overlay = document.createElement('div');
+        overlay.className = 'link-input';
+        overlay.innerHTML = `
+            <input type="url" placeholder="URL을 입력하세요 (예: https://...)" value="${escHtml(currentUrl)}">
+            <button type="button" class="li-apply">적용</button>
+            ${currentUrl ? '<button type="button" class="li-remove">제거</button>' : ''}
+        `;
+        overlay.style.position = 'fixed';
+        overlay.style.left = Math.round(rect.left) + 'px';
+        overlay.style.top = Math.round(rect.bottom + 6) + 'px';
+        overlay.style.zIndex = '5100';
+        document.body.appendChild(overlay);
+        const input = overlay.querySelector('input');
+        input.focus();
+        input.select();
+
+        const cleanup = () => { overlay.remove(); document.removeEventListener('mousedown', outsideClose, true); };
+        const outsideClose = (e) => { if (!overlay.contains(e.target)) cleanup(); };
+        const restoreSelection = () => {
+            const s = window.getSelection();
+            s.removeAllRanges();
+            s.addRange(savedRange);
+        };
+        const apply = () => {
+            const url = input.value.trim();
+            if (!url) { cleanup(); return; }
+            restoreSelection();
+            document.execCommand('createLink', false, url);
+            scheduleSave();
+            cleanup();
+        };
+        const remove = () => {
+            restoreSelection();
+            document.execCommand('unlink');
+            scheduleSave();
+            cleanup();
+        };
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); apply(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cleanup(); }
+        });
+        overlay.querySelector('.li-apply').addEventListener('click', apply);
+        const rmBtn = overlay.querySelector('.li-remove');
+        if (rmBtn) rmBtn.addEventListener('click', remove);
+        // Defer the outside-close listener so the initial click that opened
+        // the input doesn't immediately close it.
+        setTimeout(() => document.addEventListener('mousedown', outsideClose, true), 0);
+    }
+
+    // ==================== Block menu (Cmd+/, right-click) ====================
+    let _blockMenuEl = null;
+
+    function closeBlockMenu() {
+        if (_blockMenuEl) _blockMenuEl.remove();
+        _blockMenuEl = null;
+    }
+
+    function openBlockMenu(editor, x, y, targetBlock) {
+        closeBlockMenu();
+        const el = document.createElement('div');
+        el.className = 'block-menu';
+        el.style.position = 'fixed';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.zIndex = '5200';
+
+        const turnIntoItems = NOTION_BLOCKS
+            .map(b => `<div class="bm-item" data-act="turn:${b.key}"><span class="bm-icon">${b.icon}</span><span class="bm-label">${escHtml(b.label)}</span>${b.shortcut ? `<span class="bm-shortcut">${escHtml(b.shortcut)}</span>` : ''}</div>`)
+            .join('');
+
+        el.innerHTML = `
+            <div class="bm-section-title">변환</div>
+            ${turnIntoItems}
+            <div class="bm-divider"></div>
+            <div class="bm-item" data-act="duplicate"><span class="bm-icon">📋</span><span class="bm-label">복제</span><span class="bm-shortcut">⌘D</span></div>
+            <div class="bm-item" data-act="move-up"><span class="bm-icon">↑</span><span class="bm-label">위로 이동</span><span class="bm-shortcut">⌘⇧↑</span></div>
+            <div class="bm-item" data-act="move-down"><span class="bm-icon">↓</span><span class="bm-label">아래로 이동</span><span class="bm-shortcut">⌘⇧↓</span></div>
+            <div class="bm-divider"></div>
+            <div class="bm-item danger" data-act="delete"><span class="bm-icon">🗑</span><span class="bm-label">삭제</span></div>
+        `;
+        document.body.appendChild(el);
+
+        // Clamp to viewport
+        const rect = el.getBoundingClientRect();
+        if (rect.right > window.innerWidth - 8) {
+            el.style.left = Math.max(8, window.innerWidth - rect.width - 8) + 'px';
+        }
+        if (rect.bottom > window.innerHeight - 8) {
+            el.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
+        }
+
+        el.addEventListener('mousedown', (e) => {
+            const item = e.target.closest('.bm-item');
+            if (!item) return;
+            e.preventDefault();
+            performBlockAction(editor, targetBlock, item.dataset.act);
+            closeBlockMenu();
+        });
+
+        const outside = (e) => {
+            if (!el.contains(e.target)) {
+                closeBlockMenu();
+                document.removeEventListener('mousedown', outside, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    }
+
+    function performBlockAction(editor, block, act) {
+        if (!block) return;
+        if (act.startsWith('turn:')) {
+            const key = act.slice(5);
+            const def = NOTION_BLOCKS.find(b => b.key === key);
+            if (def) convertBlockTo(editor, block, def.kind);
+        } else if (act === 'duplicate') {
+            const clone = block.cloneNode(true);
+            block.after(clone);
+            placeCaretAtStart(clone);
+        } else if (act === 'move-up') {
+            const prev = block.previousElementSibling;
+            if (prev) block.parentNode.insertBefore(block, prev);
+        } else if (act === 'move-down') {
+            const next = block.nextElementSibling;
+            if (next) block.parentNode.insertBefore(next, block);
+        } else if (act === 'delete') {
+            const next = block.nextElementSibling || block.previousElementSibling;
+            block.remove();
+            if (next) placeCaretAtStart(next);
+        }
+        scheduleSave();
+    }
+
     /** Wire a contenteditable markdown editor. */
     function setupNotionEditor(editor) {
         if (!editor) return;
         editor.setAttribute('contenteditable', 'true');
         editor.setAttribute('spellcheck', 'false');
 
-        // Markdown shortcut on space
         editor.addEventListener('input', (e) => {
+            // Opening the slash menu: user just typed "/"
+            if (e.inputType === 'insertText' && e.data === '/' && !_slashState) {
+                openSlashMenu(editor);
+            } else if (_slashState) {
+                // Keep the filter in sync as the user types after "/"
+                updateSlashMenuFilter(editor);
+            }
+            // Block-level markdown shortcuts on space
             if (e.inputType === 'insertText' && e.data === ' ') {
                 tryMarkdownShortcut(editor);
             }
@@ -1531,18 +2039,95 @@
         });
 
         editor.addEventListener('keydown', (e) => {
+            // Slash menu consumes keys first (Arrow/Enter/Escape)
+            if (_slashState && handleSlashMenuKey(e)) return;
+
             if (e.key === 'Enter' && !e.shiftKey) {
                 if (tryEnterBehavior(editor, e)) return;
             }
             if (e.key === 'Escape') {
+                if (_blockMenuEl) { e.preventDefault(); closeBlockMenu(); return; }
                 e.preventDefault();
                 editor.blur();
                 flushSave();
                 return;
             }
+
             const mod = e.ctrlKey || e.metaKey;
             if (!mod) return;
             const k = e.key.toLowerCase();
+
+            // Block type shortcuts: Cmd+Option+0..8
+            if (e.altKey && BLOCK_KEY_SHORTCUTS[e.key] !== undefined) {
+                e.preventDefault();
+                convertCurrentBlock(editor, BLOCK_KEY_SHORTCUTS[e.key]);
+                scheduleSave();
+                return;
+            }
+            // Block menu: Cmd+/
+            if (k === '/') {
+                e.preventDefault();
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                const block = closestBlock(sel.getRangeAt(0).startContainer, editor);
+                if (!block) return;
+                const rect = sel.getRangeAt(0).getBoundingClientRect();
+                openBlockMenu(editor, rect.left, rect.bottom + 6, block);
+                return;
+            }
+            // Cmd+D — duplicate current block
+            if (k === 'd' && !e.shiftKey && !e.altKey) {
+                e.preventDefault();
+                const sel = window.getSelection();
+                if (sel.rangeCount) {
+                    const block = closestBlock(sel.getRangeAt(0).startContainer, editor);
+                    if (block) {
+                        const clone = block.cloneNode(true);
+                        block.after(clone);
+                        placeCaretAtStart(clone);
+                        scheduleSave();
+                    }
+                }
+                return;
+            }
+            // Cmd+Shift+Up / Cmd+Shift+Down — move block
+            if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                const sel = window.getSelection();
+                if (!sel.rangeCount) return;
+                const block = closestBlock(sel.getRangeAt(0).startContainer, editor);
+                if (!block) return;
+                e.preventDefault();
+                if (e.key === 'ArrowUp') {
+                    const prev = block.previousElementSibling;
+                    if (prev) block.parentNode.insertBefore(block, prev);
+                } else {
+                    const next = block.nextElementSibling;
+                    if (next) block.parentNode.insertBefore(next, block);
+                }
+                placeCaretAtStart(block);
+                scheduleSave();
+                return;
+            }
+            // Cmd+K — link
+            if (k === 'k') {
+                e.preventDefault();
+                openLinkInput();
+                return;
+            }
+            // Cmd+U — underline
+            if (k === 'u' && !e.shiftKey) {
+                e.preventDefault();
+                document.execCommand('underline');
+                scheduleSave();
+                return;
+            }
+            // Cmd+Shift+S — strikethrough
+            if (k === 's' && e.shiftKey) {
+                e.preventDefault();
+                document.execCommand('strikeThrough');
+                scheduleSave();
+                return;
+            }
             if (k === 'b') {
                 e.preventDefault();
                 document.execCommand('bold');
@@ -1555,14 +2140,35 @@
                 e.preventDefault();
                 wrapSelectionWithTag('code');
                 scheduleSave();
-            } else if (k === 's') {
+            } else if (k === 's' && !e.shiftKey) {
                 e.preventDefault();
                 flushSave();
             }
         });
 
+        // Selection toolbar — track selection changes inside this editor
+        const selectionHandler = () => {
+            if (document.activeElement !== editor && !editor.contains(document.activeElement)) {
+                hideSelectionToolbar();
+                return;
+            }
+            updateSelectionToolbar(editor);
+        };
+        document.addEventListener('selectionchange', selectionHandler);
+
+        // Right-click → block menu
+        editor.addEventListener('contextmenu', (e) => {
+            const block = closestBlock(e.target, editor);
+            if (!block) return;
+            e.preventDefault();
+            openBlockMenu(editor, e.clientX, e.clientY, block);
+        });
+
         // Save on blur too (belt and suspenders)
-        editor.addEventListener('blur', () => { flushSave(); });
+        editor.addEventListener('blur', () => {
+            hideSelectionToolbar();
+            flushSave();
+        });
 
         // Paste: strip rich HTML formatting, paste as plain text. Users who
         // paste from Word/Notion/etc. won't inherit wild inline styles.
