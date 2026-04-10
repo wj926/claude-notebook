@@ -71,6 +71,10 @@ let scrollDragStartTop = 0;
 // Terminal list render cache
 let lastRenderKey = '';
 
+// Drag-and-drop reorder state (PR #2 — Harry24k/claude-notebook)
+let dragSrcEl = null;
+let terminalOrder = []; // user-defined order of terminal names
+
 // Config modal state
 let modalResolve = null;
 let modalMode = 'create'; // 'create' or 'rename'
@@ -381,14 +385,31 @@ function renderList(terminals) {
         return;
     }
     termList.innerHTML = '';
-    terminals.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-    terminals.forEach(t => {
+
+    // Apply user-defined order, append any new terminals at the end so
+    // freshly-spawned sessions are immediately visible. Any orphaned
+    // entries in `terminalOrder` (terminals that were closed) are dropped
+    // implicitly when we re-derive the array from the rendered list.
+    const termMap = Object.fromEntries(terminals.map(t => [t.name, t]));
+    const ordered = [];
+    terminalOrder.forEach(name => {
+        if (termMap[name]) { ordered.push(termMap[name]); delete termMap[name]; }
+    });
+    const remaining = Object.values(termMap)
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    ordered.push(...remaining);
+    terminalOrder = ordered.map(t => t.name);
+    saveTerminalOrder();
+
+    ordered.forEach(t => {
         const item = document.createElement('div');
         item.className = 'term-item' + (t.name === currentName ? ' active' : '');
         item.dataset.name = t.name;
+        item.draggable = true;
         const ago = timeAgo(t.last_activity);
         const displayName = getDisplayName(t);
         item.innerHTML = `
+            <span class="term-item-drag" title="드래그하여 순서 변경">⠿</span>
             <span class="term-item-icon">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.146 3.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708-.708L4.793 6.5 2.146 3.854a.5.5 0 0 1 0-.708zM6 10h4a.5.5 0 0 1 0 1H6a.5.5 0 0 1 0-1z"/></svg>
             </span>
@@ -396,9 +417,17 @@ function renderList(terminals) {
             <span class="term-item-time">${ago}</span>
             <button class="term-item-close" title="Shutdown terminal">&times;</button>
         `;
+        // Drag-and-drop handlers (PR #2)
+        item.addEventListener('dragstart', handleTermDragStart);
+        item.addEventListener('dragover', handleTermDragOver);
+        item.addEventListener('dragenter', handleTermDragEnter);
+        item.addEventListener('dragleave', handleTermDragLeave);
+        item.addEventListener('drop', handleTermDrop);
+        item.addEventListener('dragend', handleTermDragEnd);
         // Click to connect
         item.addEventListener('click', (e) => {
             if (e.target.closest('.term-item-close')) return;
+            if (e.target.closest('.term-item-drag')) return;
             if (e.target.closest('.term-item-name')?.isContentEditable) return;
             if (isMobile) closeSidebar();
             connectTerminal(t.name);
@@ -416,6 +445,63 @@ function renderList(terminals) {
         });
         termList.appendChild(item);
     });
+}
+
+// ========== Drag & drop reorder (PR #2) ==========
+function handleTermDragStart(e) {
+    dragSrcEl = this;
+    this.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', this.dataset.name);
+}
+function handleTermDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const rect = this.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    this.classList.remove('drag-above', 'drag-below');
+    if (e.clientY < midY) this.classList.add('drag-above');
+    else this.classList.add('drag-below');
+}
+function handleTermDragEnter(e) { e.preventDefault(); }
+function handleTermDragLeave() { this.classList.remove('drag-above', 'drag-below'); }
+function handleTermDrop(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    this.classList.remove('drag-above', 'drag-below');
+    if (!dragSrcEl || dragSrcEl === this) return;
+
+    const srcName = dragSrcEl.dataset.name;
+    const tgtName = this.dataset.name;
+    const srcIdx = terminalOrder.indexOf(srcName);
+    if (srcIdx === -1 || terminalOrder.indexOf(tgtName) === -1) return;
+
+    const rect = this.getBoundingClientRect();
+    const insertBefore = e.clientY < rect.top + rect.height / 2;
+    terminalOrder.splice(srcIdx, 1);
+    let newIdx = terminalOrder.indexOf(tgtName);
+    if (!insertBefore) newIdx++;
+    terminalOrder.splice(newIdx, 0, srcName);
+
+    saveTerminalOrder();
+    lastRenderKey = ''; // invalidate cache so next render picks up the order
+    loadTerminals();
+}
+function handleTermDragEnd() {
+    this.classList.remove('dragging');
+    document.querySelectorAll('.term-item').forEach(el => {
+        el.classList.remove('drag-above', 'drag-below');
+    });
+    dragSrcEl = null;
+}
+function saveTerminalOrder() {
+    try { localStorage.setItem('claude-notebook-term-order', JSON.stringify(terminalOrder)); } catch {}
+}
+function loadTerminalOrder() {
+    try {
+        const saved = localStorage.getItem('claude-notebook-term-order');
+        if (saved) terminalOrder = JSON.parse(saved);
+    } catch {}
 }
 
 function startRename(nameEl, termName) {
@@ -1515,6 +1601,7 @@ function connectFromHash() {
     }
 }
 
+loadTerminalOrder();
 loadTerminals().then(() => connectFromHash());
 setInterval(loadTerminals, 10000);
 window.addEventListener('hashchange', connectFromHash);

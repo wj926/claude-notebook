@@ -231,6 +231,38 @@ html, body {
     color: #fff;
     border-color: var(--danger);
 }
+/* Drag handle (left of icon, hover to reveal) */
+.term-item-drag {
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+    color: var(--text-secondary);
+    cursor: grab;
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: 12px;
+    line-height: 1;
+    user-select: none;
+}
+.term-item:hover .term-item-drag {
+    opacity: 0.5;
+}
+.term-item-drag:hover {
+    opacity: 1 !important;
+}
+.term-item-drag:active {
+    cursor: grabbing;
+}
+/* Drag visual feedback */
+.term-item.dragging {
+    opacity: 0.4;
+}
+.term-item.drag-above {
+    box-shadow: 0 -2px 0 0 var(--accent);
+}
+.term-item.drag-below {
+    box-shadow: 0 2px 0 0 var(--accent);
+}
 .term-empty {
     padding: 24px 16px;
     text-align: center;
