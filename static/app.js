@@ -3347,8 +3347,9 @@
             <button data-cmd="link" title="Link (⌘K)">🔗</button>
             <button data-cmd="color" title="색상 (⌘⇧H)"><span class="st-color">A</span>▾</button>
         `;
-        // Use mousedown so we can preventDefault before the selection is lost
-        el.addEventListener('mousedown', (e) => {
+        // Use pointerdown so we can preventDefault before the selection is
+        // lost. pointerdown covers mouse, touch, and pen with a single path.
+        el.addEventListener('pointerdown', (e) => {
             const btn = e.target.closest('button');
             if (!btn) return;
             e.preventDefault();
@@ -3370,6 +3371,11 @@
         if (_selToolbarEl) _selToolbarEl.style.display = 'none';
     }
     function updateSelectionToolbar(editor) {
+        // On mobile, don't fight the native iOS/Android selection menu.
+        // The custom Notion-style toolbar would stack on top of the OS copy/paste
+        // UI and race with it. Users keep the standard copy/paste flow; Bold etc.
+        // remain desktop-only for now.
+        if (isMobile()) { hideSelectionToolbar(); return; }
         const sel = window.getSelection();
         if (!sel.rangeCount || sel.isCollapsed) { hideSelectionToolbar(); return; }
         const range = sel.getRangeAt(0);
@@ -3510,7 +3516,11 @@
             el.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
         }
 
-        el.addEventListener('mousedown', (e) => {
+        // pointerdown unifies mouse + touch + pen. On iOS Safari < 13 it may be
+        // missing, but the menu is desktop-only anyway now (mobile contextmenu
+        // early-returns). Keeping the handler here so any other future entry
+        // point still gets a tap response immediately.
+        el.addEventListener('pointerdown', (e) => {
             const item = e.target.closest('.bm-item');
             if (!item) return;
             e.preventDefault();
@@ -3518,13 +3528,21 @@
             closeBlockMenu();
         });
 
+        // Outside-dismiss: use pointerdown (mouse/touch/pen) AND touchstart as a
+        // belt-and-suspenders fallback so the menu never gets stuck — the old
+        // code only listened for `mousedown`, which iOS/Android do not reliably
+        // synthesize from touches, causing the menu to live forever.
         const outside = (e) => {
             if (!el.contains(e.target)) {
                 closeBlockMenu();
-                document.removeEventListener('mousedown', outside, true);
+                document.removeEventListener('pointerdown', outside, true);
+                document.removeEventListener('touchstart', outside, true);
             }
         };
-        setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+        setTimeout(() => {
+            document.addEventListener('pointerdown', outside, true);
+            document.addEventListener('touchstart', outside, true);
+        }, 0);
     }
 
     function performBlockAction(editor, block, act) {
@@ -3760,8 +3778,15 @@
         window.addEventListener('scroll', () => updateCodeLangIndicator(editor), true);
         window.addEventListener('resize', () => updateCodeLangIndicator(editor));
 
-        // Right-click → block menu
+        // Right-click → block menu.
+        // On mobile, `contextmenu` is synthesized by long-press, which is also
+        // how the user invokes the native copy/paste menu. Intercepting it here
+        // would open our "변환" menu AND prevent the OS menu — and because the
+        // block menu's outside-dismiss relied on mousedown (which touch does
+        // not reliably synthesize), it could also get stuck. Desktop keeps the
+        // right-click behaviour; mobile gets the native selection UI back.
         editor.addEventListener('contextmenu', (e) => {
+            if (isMobile()) return;
             const block = closestBlock(e.target, editor);
             if (!block) return;
             e.preventDefault();
