@@ -253,6 +253,19 @@ IMAGE_CONTENT_TYPES = {
     '.ico': 'image/x-icon', '.bmp': 'image/bmp',
 }
 
+# Audio / video — served with correct Content-Type so <audio>/<video> tags
+# inside rendered markdown play directly. Without these, the default
+# application/octet-stream falls back to a download instead.
+MEDIA_CONTENT_TYPES = {
+    # Audio
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+    '.oga': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    '.flac': 'audio/flac', '.opus': 'audio/ogg',
+    # Video
+    '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
+    '.ogv': 'video/ogg', '.mov': 'video/quicktime',
+}
+
 
 # ---------------------------------------------------------------------------
 # Base handler with shared helpers
@@ -447,12 +460,23 @@ class WorkspaceFileHandler(BaseHandler):
         ext = full_path.suffix.lower()
         file_size = full_path.stat().st_size
 
-        # Image or raw mode: stream as binary
-        if raw_mode is not None or ext in IMAGE_CONTENT_TYPES:
-            ct = IMAGE_CONTENT_TYPES.get(ext, 'application/octet-stream')
+        # Image, audio/video, or explicit raw mode: stream as binary with the
+        # right Content-Type so <img>/<audio>/<video> can render/play.
+        if (
+            raw_mode is not None
+            or ext in IMAGE_CONTENT_TYPES
+            or ext in MEDIA_CONTENT_TYPES
+        ):
+            ct = (
+                IMAGE_CONTENT_TYPES.get(ext)
+                or MEDIA_CONTENT_TYPES.get(ext)
+                or 'application/octet-stream'
+            )
             self.set_header("Content-Type", ct)
             self.set_header("Content-Length", str(file_size))
             self.set_header("Cache-Control", "public, max-age=3600")
+            # Help native media controls show a scrubbable timeline.
+            self.set_header("Accept-Ranges", "bytes")
             await self._stream_file(full_path)
             return
 

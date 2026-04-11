@@ -131,6 +131,62 @@
     };
     function getFileIcon(name) { return FILE_ICONS[name.split('.').pop().toLowerCase()] || '📄'; }
     const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'];
+    // Audio / video extensions served inline via /api/file?raw=1 with the
+    // correct Content-Type (see jupyter_ext MEDIA_CONTENT_TYPES).
+    const AUDIO_EXTS = ['.mp3', '.wav', '.ogg', '.oga', '.m4a', '.aac', '.flac', '.opus'];
+    const VIDEO_EXTS = ['.mp4', '.m4v', '.webm', '.ogv', '.mov'];
+
+    /** Build the raw-stream URL for a workspace-absolute path. */
+    function apiRawUrl(workspacePath) {
+        return `${BASE}/api/file?path=${encodeURIComponent(workspacePath)}&raw=1`;
+    }
+
+    /** Resolve a relative path (as it appears in a markdown link/image)
+     *  against a workspace-absolute directory. Returns the resolved
+     *  workspace path, or null if the input is an external URL / hash / etc. */
+    function resolveRelPath(relPath, fileDir) {
+        if (!relPath) return null;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(relPath)) return null; // http:, mailto:, data:
+        if (relPath.startsWith('#') || relPath.startsWith('/')) return null;
+        const parts = (fileDir ? fileDir.split('/') : []).filter(Boolean);
+        const stripped = relPath.replace(/^\.\//, '');
+        for (const seg of stripped.split('/')) {
+            if (seg === '' || seg === '.') continue;
+            if (seg === '..') { if (parts.length) parts.pop(); continue; }
+            parts.push(seg);
+        }
+        return parts.join('/');
+    }
+
+    /** Walk the rendered markdown DOM and rewrite relative src/href on
+     *  <img>, <audio>, <video>, <source>, <a> so they resolve to the
+     *  workspace file API. Original values are stashed in data-*-original
+     *  so domToMarkdown can round-trip the clean relative form back. */
+    function rewriteRelativeMediaUrls(rootEl, fileDir) {
+        if (!rootEl) return;
+        rootEl.querySelectorAll('img[src], audio[src], video[src], source[src]').forEach((el) => {
+            const src = el.getAttribute('src') || '';
+            const resolved = resolveRelPath(src, fileDir);
+            if (resolved == null) return;
+            el.setAttribute('data-src-original', src);
+            el.setAttribute('src', apiRawUrl(resolved));
+        });
+        rootEl.querySelectorAll('a[href]').forEach((el) => {
+            const href = el.getAttribute('href') || '';
+            const resolved = resolveRelPath(href, fileDir);
+            if (resolved == null) return;
+            el.setAttribute('data-href-original', href);
+            el.setAttribute('data-workspace-path', resolved);
+        });
+    }
+
+    /** Return the workspace dir containing the currently-open file. */
+    function currentFileDir() {
+        if (!currentFileData || !currentFileData.path) return '';
+        const p = currentFileData.path;
+        const i = p.lastIndexOf('/');
+        return i === -1 ? '' : p.slice(0, i);
+    }
 
     // === Fetch helpers ===
     // Normalize backslashes to forward slashes (Windows compat)
@@ -1052,8 +1108,8 @@
         _mdViewMode = 'rendered';
         previewColorRules.style.display = 'none';
         setSaveStatus('idle');
-        updateHash(currentPath);
-        const folderName = currentPath.split('/').pop() || 'Workspace';
+        updateHash(currentFinderPath);
+        const folderName = currentFinderPath.split('/').pop() || 'Workspace';
         document.title = folderName + ' - Claude Notebook';
     }
     previewClose.addEventListener('click', closePreviewFn);
@@ -1290,8 +1346,17 @@
                 if (tag === 'br') { out += '  \n'; continue; }
                 if (tag === 'img') {
                     const alt = node.getAttribute('alt') || '';
-                    const src = node.getAttribute('src') || '';
+                    // Prefer the clean relative form saved by
+                    // rewriteRelativeMediaUrls so we round-trip cleanly.
+                    const src = node.getAttribute('data-src-original') || node.getAttribute('src') || '';
                     out += `![${alt}](${src})`;
+                    continue;
+                }
+                if (tag === 'audio' || tag === 'video') {
+                    // Images use their natural markdown form; audio/video have
+                    // no markdown equivalent so we pass raw HTML which marked.js
+                    // re-renders on the next open.
+                    out += mediaTagToHtml(node);
                     continue;
                 }
                 const inner = inlineToMd(node);
@@ -1306,7 +1371,7 @@
                         out += `<u>${inner}</u>`;
                         break;
                     case 'a': {
-                        const href = node.getAttribute('href') || '';
+                        const href = node.getAttribute('data-href-original') || node.getAttribute('href') || '';
                         out += `[${inner}](${href})`;
                         break;
                     }
@@ -1485,6 +1550,16 @@
     }
 
     /** Serialize the whole editor to Markdown. */
+    /** Serialize an <audio>/<video> element back to raw HTML with the clean
+     *  relative src so round-trips stay stable. */
+    function mediaTagToHtml(node) {
+        const tag = node.tagName.toLowerCase();
+        const src = node.getAttribute('data-src-original') || node.getAttribute('src') || '';
+        const controls = node.hasAttribute('controls') ? ' controls' : '';
+        const extra = tag === 'video' ? ' width="100%"' : '';
+        return `<${tag} src="${src}"${controls}${extra}></${tag}>`;
+    }
+
     function domToMarkdown(editor) {
         if (!editor) return '';
         const parts = [];
@@ -1493,7 +1568,15 @@
                 const t = child.textContent.replace(/^\s+|\s+$/g, '');
                 if (t) parts.push(t);
             } else if (child.nodeType === Node.ELEMENT_NODE) {
-                if (BLOCK_TAGS.has(child.tagName.toLowerCase())) {
+                const childTag = child.tagName.toLowerCase();
+                // Top-level audio/video (rare — usually wrapped in <p> by
+                // marked, but possible after edits). Handle explicitly so
+                // they don't evaporate through the stray-inline branch.
+                if (childTag === 'audio' || childTag === 'video') {
+                    parts.push(mediaTagToHtml(child));
+                    continue;
+                }
+                if (BLOCK_TAGS.has(childTag)) {
                     parts.push(blockToMd(child));
                 } else {
                     // stray inline at top level — wrap as paragraph
@@ -2763,27 +2846,41 @@
         renderEmojiPicker();
     }
 
-    // ==================== @date mention ====================
-    const MENTION_OPTIONS = [
-        { k: 'today',     label: '오늘',       build: () => formatDate(new Date()) },
-        { k: 'tomorrow',  label: '내일',       build: () => { const d = new Date(); d.setDate(d.getDate() + 1); return formatDate(d); } },
-        { k: 'yesterday', label: '어제',       build: () => { const d = new Date(); d.setDate(d.getDate() - 1); return formatDate(d); } },
-        { k: 'now',       label: '지금',       build: () => formatDateTime(new Date()) },
-        { k: 'time',      label: '현재 시간',   build: () => formatTime(new Date()) },
-        { k: 'week',      label: '이번 주',    build: () => formatWeek(new Date()) },
-    ];
-    function pad2(n) { return String(n).padStart(2, '0'); }
-    function formatDate(d) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
-    function formatTime(d) { return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
-    function formatDateTime(d) { return `${formatDate(d)} ${formatTime(d)}`; }
-    function formatWeek(d) {
-        const s = new Date(d); s.setDate(d.getDate() - d.getDay());
-        const e = new Date(s); e.setDate(s.getDate() + 6);
-        return `${formatDate(s)} ~ ${formatDate(e)}`;
+    // ==================== @ file reference picker ====================
+    // Typing `@` in the markdown editor opens a picker listing files from the
+    // same folder as the currently-open file. Selecting one inserts:
+    //   • Image: `![name](filename)` — rendered inline via rewriteRelativeMediaUrls.
+    //   • Video: `<video src="filename" controls width="100%"></video>`.
+    //   • Audio: `<audio src="filename" controls></audio>`.
+    //   • Other: `[name](filename)` — a regular markdown link.
+    // The path stored in the .md source is the clean relative form (just the
+    // filename, since we only list same-folder files); rewriteRelativeMediaUrls
+    // resolves it to `/api/file?raw=1` at preview time.
+
+    function mentionCategoryFor(ext) {
+        if (IMAGE_EXTS.includes(ext)) return 'image';
+        if (VIDEO_EXTS.includes(ext)) return 'video';
+        if (AUDIO_EXTS.includes(ext)) return 'audio';
+        return 'other';
+    }
+    function mentionIconFor(cat) {
+        if (cat === 'image') return '🖼';
+        if (cat === 'video') return '🎬';
+        if (cat === 'audio') return '🎵';
+        return '📄';
+    }
+    function mentionInsertFor(cat, nameNoPath) {
+        // nameNoPath is the filename only (same folder). Display label for
+        // markdown links strips the extension to keep the source tidy.
+        const label = nameNoPath.replace(/\.[^.]+$/, '') || nameNoPath;
+        if (cat === 'image') return `![${label}](${nameNoPath})`;
+        if (cat === 'video') return `<video src="${nameNoPath}" controls width="100%"></video>`;
+        if (cat === 'audio') return `<audio src="${nameNoPath}" controls></audio>`;
+        return `[${label}](${nameNoPath})`;
     }
 
     let _mentionState = null;
-    function openMentionPicker(editor) {
+    async function openMentionPicker(editor) {
         closeMentionPicker();
         const sel = window.getSelection();
         if (!sel.rangeCount) return;
@@ -2795,8 +2892,39 @@
         el.style.top = Math.round(rect.bottom + 6) + 'px';
         el.style.zIndex = '5000';
         document.body.appendChild(el);
-        _mentionState = { editor, el, filter: '', index: 0 };
+        _mentionState = { editor, el, filter: '', index: 0, files: null, loading: true };
         renderMentionPicker();
+        // Load the sibling files in the current folder. Deliberately scoped to
+        // the same directory so the picker stays fast and the inserted path
+        // stays a clean one-level reference.
+        try {
+            const dir = currentFileDir();
+            const items = await fetchTreeLevel(dir);
+            // Skip the current file itself; only show files (not folders).
+            const curName = currentFileData && currentFileData.path
+                ? currentFileData.path.split('/').pop()
+                : '';
+            const files = items
+                .filter((it) => it.type === 'file' && it.name !== curName)
+                .map((it) => {
+                    const ext = '.' + (it.name.split('.').pop() || '').toLowerCase();
+                    return { name: it.name, ext, category: mentionCategoryFor(ext) };
+                });
+            // Sort: media first (so the main use case surfaces), then alpha.
+            const rank = { image: 0, video: 0, audio: 0, other: 1 };
+            files.sort((a, b) => (rank[a.category] - rank[b.category]) || a.name.localeCompare(b.name));
+            if (!_mentionState) return; // picker was closed while loading
+            _mentionState.files = files;
+            _mentionState.loading = false;
+            renderMentionPicker();
+        } catch (err) {
+            if (!_mentionState) return;
+            _mentionState.files = [];
+            _mentionState.loading = false;
+            _mentionState.error = err.message || '로드 실패';
+            renderMentionPicker();
+        }
+        // Re-clamp in case the loaded list grew past the viewport.
         const r = el.getBoundingClientRect();
         if (r.bottom > window.innerHeight - 8) {
             el.style.top = Math.round(rect.top - r.height - 6) + 'px';
@@ -2807,27 +2935,35 @@
         _mentionState = null;
     }
     function mentionFiltered() {
-        if (!_mentionState) return [];
+        if (!_mentionState || !_mentionState.files) return [];
         const f = _mentionState.filter.toLowerCase();
-        if (!f) return MENTION_OPTIONS;
-        return MENTION_OPTIONS.filter(m => m.k.includes(f) || m.label.includes(f));
+        if (!f) return _mentionState.files;
+        return _mentionState.files.filter((it) => it.name.toLowerCase().includes(f));
     }
     function renderMentionPicker() {
         if (!_mentionState) return;
+        if (_mentionState.loading) {
+            _mentionState.el.innerHTML = '<div class="mp-empty">불러오는 중…</div>';
+            return;
+        }
+        if (_mentionState.error) {
+            _mentionState.el.innerHTML = `<div class="mp-empty">오류: ${escHtml(_mentionState.error)}</div>`;
+            return;
+        }
         const items = mentionFiltered();
         if (_mentionState.index >= items.length) _mentionState.index = 0;
         _mentionState.el.innerHTML = items.length === 0
-            ? '<div class="mp-empty">일치 없음</div>'
-            : `<div class="mp-header">날짜/시간${_mentionState.filter ? ' @' + escHtml(_mentionState.filter) : ''}</div>` +
-              items.map((m, i) => `
-                <div class="mp-item ${i === _mentionState.index ? 'active' : ''}" data-k="${m.k}">
-                    <span class="mp-icon">📅</span>
-                    <span class="mp-label">${escHtml(m.label)}</span>
-                    <span class="mp-preview">${escHtml(m.build())}</span>
+            ? '<div class="mp-empty">일치하는 파일 없음</div>'
+            : `<div class="mp-header">파일 참조${_mentionState.filter ? ' @' + escHtml(_mentionState.filter) : ''}</div>` +
+              items.slice(0, 50).map((it, i) => `
+                <div class="mp-item ${i === _mentionState.index ? 'active' : ''}" data-k="${escHtml(it.name)}">
+                    <span class="mp-icon">${mentionIconFor(it.category)}</span>
+                    <span class="mp-label">${escHtml(it.name)}</span>
+                    <span class="mp-preview">${escHtml(it.ext.replace(/^\./, ''))}</span>
                 </div>
               `).join('');
         _mentionState.el.querySelectorAll('.mp-item').forEach((el, i) => {
-            el.addEventListener('mousedown', (ev) => {
+            el.addEventListener('pointerdown', (ev) => {
                 ev.preventDefault();
                 _mentionState.index = i;
                 commitMentionPicker();
@@ -2844,13 +2980,53 @@
         const items = mentionFiltered();
         const item = items[_mentionState.index];
         if (!item) { closeMentionPicker(); return; }
-        // Strip "@filter" and insert the date text
+        // Strip the typed "@filter" first so the insertion replaces it.
         const filter = _mentionState.filter;
-        const toDelete = filter.length + 1;
+        const toDelete = filter.length + 1; // include the @
         for (let i = 0; i < toDelete; i++) document.execCommand('delete');
+        const editorEl = _mentionState.editor;
+        const fileDir = currentFileDir();
         closeMentionPicker();
-        document.execCommand('insertText', false, item.build());
+        const mdSnippet = mentionInsertFor(item.category, item.name);
+        if (item.category === 'image') {
+            // Markdown image — convert to an <img> node so it renders right
+            // now (marked would also produce this but doing it inline lets us
+            // pre-apply the API URL, so no flicker).
+            const img = document.createElement('img');
+            img.setAttribute('alt', item.name.replace(/\.[^.]+$/, ''));
+            img.setAttribute('data-src-original', item.name);
+            const resolved = resolveRelPath(item.name, fileDir);
+            img.setAttribute('src', resolved != null ? apiRawUrl(resolved) : item.name);
+            insertNodeAtCaret(img, editorEl);
+        } else if (item.category === 'audio' || item.category === 'video') {
+            const tag = item.category;
+            const media = document.createElement(tag);
+            media.setAttribute('controls', '');
+            if (tag === 'video') media.setAttribute('width', '100%');
+            media.setAttribute('data-src-original', item.name);
+            const resolved = resolveRelPath(item.name, fileDir);
+            media.setAttribute('src', resolved != null ? apiRawUrl(resolved) : item.name);
+            insertNodeAtCaret(media, editorEl);
+        } else {
+            // Plain file — insert a regular markdown link via execCommand so it
+            // slots into whatever text/block the caret is in.
+            document.execCommand('insertText', false, mdSnippet);
+        }
         scheduleSave();
+    }
+    /** Insert a DOM node at the current caret and leave the caret just after
+     *  it. Used for @-picker media insertions where the node is the payload. */
+    function insertNodeAtCaret(node, editor) {
+        const sel = window.getSelection();
+        if (!sel.rangeCount) { editor.appendChild(node); return; }
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(node);
+        // Move caret after the inserted node
+        range.setStartAfter(node);
+        range.setEndAfter(node);
+        sel.removeAllRanges();
+        sel.addRange(range);
     }
     function handleMentionPickerKey(e) {
         if (!_mentionState) return false;
@@ -2886,8 +3062,10 @@
         const atIdx = head.lastIndexOf('@');
         if (atIdx === -1) { closeMentionPicker(); return; }
         const after = head.slice(atIdx + 1);
-        if (after.includes(' ') || after.includes('@')) { closeMentionPicker(); return; }
-        if (after.length > 20) { closeMentionPicker(); return; }
+        // Allow spaces in filenames — only close on explicit cancel (Escape,
+        // another @, or an absurdly long query).
+        if (after.includes('@')) { closeMentionPicker(); return; }
+        if (after.length > 40) { closeMentionPicker(); return; }
         _mentionState.filter = after;
         _mentionState.index = 0;
         renderMentionPicker();
@@ -3049,6 +3227,7 @@
                 previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
             }
             const editor = previewBody.querySelector('.notion-editor');
+            rewriteRelativeMediaUrls(editor, currentFileDir());
             setupNotionEditor(editor);
             rehydrateMathBlocks(editor);
             rehydrateTOCBlocks(editor);
@@ -3135,7 +3314,7 @@
             items: [
                 ['/', '블록 삽입 슬래시 메뉴'],
                 [':이름:', '이모지 선택'],
-                ['@', '날짜 / 시간 삽입'],
+                ['@', '폴더 내 파일 참조 (이미지/비디오/오디오 인라인)'],
                 ['⌘ S', '즉시 저장'],
                 ['⌘ ⇧ F', '포커스 모드 토글'],
             ],
@@ -3831,6 +4010,10 @@
                 previewBody.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
             }
             const editor = previewBody.querySelector('.notion-editor');
+            // Rewrite relative <img>/<audio>/<video>/<a> src so media renders
+            // inline from /api/file?raw=1. Must run BEFORE setupNotionEditor so
+            // the serialize-for-baseline step uses the data-*-original form.
+            rewriteRelativeMediaUrls(editor, currentFileDir());
             setupNotionEditor(editor);
             // Rehydrate math blocks (KaTeX re-render) and TOC click handlers
             rehydrateMathBlocks(editor);
@@ -4780,10 +4963,19 @@
     function syncHashToPath() {
         navigatingBack = true;
         const hash = decodeURIComponent(location.hash.slice(1));
+        const previewActive = previewOverlay.classList.contains('active');
+        // Hash is either a folder ("" or "notes/sub") or a file ("notes/a.md").
+        // Treat anything whose last segment has a dot as a file.
+        const lastPart = hash ? hash.split('/').pop() : '';
+        const isFileHash = lastPart.includes('.');
+        // Empty / folder hash while a preview is open → the user pressed back
+        // to close the file. Hide the preview overlay before loading the grid
+        // so we actually return to the finder view.
+        if (!isFileHash && previewActive) {
+            closePreviewFn();
+        }
         if (!hash) { loadFinderGrid(''); navigatingBack = false; return; }
-        // Check if it looks like a file (has extension) → open preview in its parent folder
-        const lastPart = hash.split('/').pop();
-        if (lastPart.includes('.')) {
+        if (isFileHash) {
             const parentPath = hash.includes('/') ? hash.substring(0, hash.lastIndexOf('/')) : '';
             loadFinderGrid(parentPath);
             openPreview(hash);
