@@ -32,6 +32,14 @@ import {
 } from './core/utils.js';
 import { initSidebar } from './ui/sidebar.js';
 import { initTree, loadTree } from './ui/tree.js';
+import {
+    downloadFile,
+    downloadPaths,
+    deleteItem as deleteItemApi,
+    deletePaths,
+    renameItem as renameItemApi,
+    initFileOpsButtons,
+} from './ui/file-ops.js';
 
 const contentEl = document.getElementById('content');
     const finder = document.getElementById('finder');
@@ -129,49 +137,26 @@ const contentEl = document.getElementById('content');
         document.getElementById('selDownloadBtn').addEventListener('click', downloadSelected);
     }
 
-    async function deleteSelected() {
-        const paths = Array.from(selectedPaths);
-        if (!confirm(`Delete ${paths.length} item(s)?`)) return;
-        try {
-            const res = await fetch(`${BASE}/api/delete-multi`, mutFetchOpts({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
-                body: JSON.stringify({ paths }),
-            }));
-            if (!res.ok) throw new Error(await res.text());
-            const data = await res.json();
-            if (data.errors && data.errors.length) {
-                alert('Some items failed to delete:\n' + data.errors.map(e => e.path + ': ' + e.error).join('\n'));
-            }
-            clearSelection();
-            loadFinderGrid(currentFinderPath);
-            loadTree();
-        } catch (err) {
-            alert('Delete failed: ' + err.message);
-        }
+    function refreshWorkspaceViews() {
+        loadFinderGrid(currentFinderPath);
+        loadTree();
     }
 
-    async function downloadSelected() {
-        const paths = Array.from(selectedPaths);
-        try {
-            const res = await fetch(`${BASE}/api/download-multi`, mutFetchOpts({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
-                body: JSON.stringify({ paths }),
-            }));
-            if (!res.ok) throw new Error('Download failed');
-            const blob = await res.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = objectUrl;
-            a.download = 'selected-files.zip';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(objectUrl);
-        } catch (err) {
-            alert('Download failed: ' + err.message);
-        }
+    async function deleteSelected() {
+        const ok = await deletePaths([...selectedPaths], refreshWorkspaceViews);
+        if (ok) clearSelection();
+    }
+
+    function downloadSelected() {
+        return downloadPaths([...selectedPaths]);
+    }
+
+    function deleteItem(item) {
+        return deleteItemApi(item, refreshWorkspaceViews);
+    }
+
+    function renameItem(item) {
+        return renameItemApi(item, refreshWorkspaceViews);
     }
 
     // === Finder Grid/Detail view ===
@@ -474,102 +459,10 @@ const contentEl = document.getElementById('content');
     }
     document.addEventListener('click', hideContextMenu);
 
-    // === File Actions ===
-    async function downloadFile(path) {
-        try {
-            const url = `${BASE}/api/download?path=${encodeURIComponent(path)}`;
-            const res = await fetch(url, fetchOpts);
-            if (!res.ok) throw new Error('Download failed');
-            const blob = await res.blob();
-            const disposition = res.headers.get('Content-Disposition') || '';
-            let dlName = path.split('/').pop();
-            const utf8Match = disposition.match(/filename\*=UTF-8''(.+)/i);
-            const plainMatch = disposition.match(/filename="(.+?)"/);
-            if (utf8Match) dlName = decodeURIComponent(utf8Match[1]);
-            else if (plainMatch) dlName = plainMatch[1];
-            const objectUrl = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = objectUrl;
-            a.download = dlName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(objectUrl);
-        } catch (err) {
-            alert('Download failed: ' + err.message);
-        }
-    }
-
-    async function deleteItem(item) {
-        if (!confirm(`Delete "${item.name}"?`)) return;
-        try {
-            const res = await fetch(`${BASE}/api/delete?path=${encodeURIComponent(item.path)}`,
-                mutFetchOpts({ method: 'DELETE' }));
-            if (!res.ok) throw new Error(await res.text());
-            loadFinderGrid(currentFinderPath);
-            loadTree(); // refresh sidebar
-        } catch (err) {
-            alert('Delete failed: ' + err.message);
-        }
-    }
-
-    // === New File ===
-    document.getElementById('newFileBtn').addEventListener('click', async () => {
-        const name = prompt('New file name (e.g. note.md):');
-        if (!name || !name.trim()) return;
-        const filePath = currentFinderPath ? currentFinderPath + '/' + name.trim() : name.trim();
-        try {
-            const res = await fetch(`${BASE}/api/newfile`, mutFetchOpts({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
-                body: JSON.stringify({ path: filePath }),
-            }));
-            if (!res.ok) throw new Error(await res.text());
-            loadFinderGrid(currentFinderPath);
-            loadTree();
-        } catch (err) {
-            alert('Failed to create file: ' + err.message);
-        }
+    initFileOpsButtons({
+        getCurrentDir: () => currentFinderPath,
+        onChanged: refreshWorkspaceViews,
     });
-
-    // === New Folder ===
-    document.getElementById('newFolderBtn').addEventListener('click', async () => {
-        const name = prompt('New folder name:');
-        if (!name || !name.trim()) return;
-        const folderPath = currentFinderPath ? currentFinderPath + '/' + name.trim() : name.trim();
-        try {
-            const res = await fetch(`${BASE}/api/mkdir`, mutFetchOpts({
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
-                body: JSON.stringify({ path: folderPath }),
-            }));
-            if (!res.ok) throw new Error(await res.text());
-            loadFinderGrid(currentFinderPath);
-            loadTree();
-        } catch (err) {
-            alert('Failed to create folder: ' + err.message);
-        }
-    });
-
-    // === Rename ===
-    async function renameItem(item) {
-        const newName = prompt('Rename to:', item.name);
-        if (!newName || !newName.trim() || newName.trim() === item.name) return;
-        const parentPath = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '';
-        const newPath = parentPath ? parentPath + '/' + newName.trim() : newName.trim();
-        try {
-            const res = await fetch(`${BASE}/api/rename`, mutFetchOpts({
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', 'X-XSRFToken': XSRF },
-                body: JSON.stringify({ old_path: item.path, new_path: newPath }),
-            }));
-            if (!res.ok) throw new Error(await res.text());
-            loadFinderGrid(currentFinderPath);
-            loadTree();
-        } catch (err) {
-            alert('Rename failed: ' + err.message);
-        }
-    }
 
     // === Upload ===
     const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
