@@ -1,7 +1,37 @@
-/* === Claude Notebook App — Finder + File Management === */
+/* === Claude Notebook App — Finder + File Management ===
+ *
+ * Entry point. Modularization is in progress (see .agent/REFACTOR.md):
+ * Phase 1 extracted pure helpers / API wrappers into `core/`.
+ * Subsequent phases will peel off feature areas (sidebar, finder, editor,
+ * CSV, calendar) into their own modules. Until then this file is the
+ * orchestrator that wires DOM lookups, app state, and event listeners.
+ */
 
-(function () {
-    const treeEl = document.getElementById('tree');
+import {
+    BASE,
+    XSRF,
+    fetchOpts,
+    mutFetchOpts,
+    apiRawUrl,
+    fetchTreeLevel,
+} from './core/api.js';
+import {
+    escHtml,
+    IMAGE_EXTS,
+    AUDIO_EXTS,
+    VIDEO_EXTS,
+    getFileIcon,
+    fileTypeLabel,
+    resolveRelPath,
+    rewriteRelativeMediaUrls,
+    isMobile,
+    formatFileSize,
+    formatSize,
+    formatByteSize,
+    formatMtime,
+} from './core/utils.js';
+
+const treeEl = document.getElementById('tree');
     const contentEl = document.getElementById('content');
     const sidebar = document.getElementById('sidebar');
     const divider = document.getElementById('divider');
@@ -30,17 +60,6 @@
     const historyPreview = document.getElementById('historyPreview');
     const historyRestore = document.getElementById('historyRestore');
 
-    const BASE = window.__VIEWER_BASE || '';
-    const XSRF = window.__XSRF_TOKEN || '';
-    const fetchOpts = { headers: { 'ngrok-skip-browser-warning': '1' }, credentials: 'same-origin' };
-    // For mutating requests (POST/DELETE), include XSRF token
-    function mutFetchOpts(extra) {
-        return {
-            ...extra,
-            credentials: 'same-origin',
-            headers: { 'ngrok-skip-browser-warning': '1', 'X-XSRFToken': XSRF, ...(extra && extra.headers) },
-        };
-    }
     let currentFinderPath = '';
     let currentPreviewPath = '';
     let isInlineEditing = false;           // true when md/txt/code textarea is shown
@@ -58,7 +77,6 @@
     let _mdViewMode = 'rendered';
 
     // === Sidebar toggle ===
-    function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
     function openSidebar() {
         sidebar.classList.add('open');
         sidebar.classList.remove('collapsed');
@@ -120,85 +138,12 @@
     document.addEventListener('mousemove', (e) => { if (isResizing) sidebar.style.width = Math.min(Math.max(e.clientX, 200), 480) + 'px'; });
     document.addEventListener('mouseup', () => { if (isResizing) { isResizing = false; divider.classList.remove('active'); document.body.style.cursor = ''; document.body.style.userSelect = ''; } });
 
-    // === Utility ===
-    function escHtml(text) { const d = document.createElement('div'); d.textContent = text; return d.innerHTML; }
-
-    const FILE_ICONS = {
-        md: '📄', markdown: '📄', py: '🐍', js: '⚙️', json: '📋', yaml: '📋', yml: '📋',
-        html: '🌐', css: '🎨', txt: '📄', sh: '⚙️', png: '🖼️', jpg: '🖼️', jpeg: '🖼️',
-        gif: '🖼️', webp: '🖼️', svg: '🖼️', bmp: '🖼️', ico: '🖼️', pdf: '📕',
-        zip: '📦', tar: '📦', gz: '📦',
-    };
-    function getFileIcon(name) { return FILE_ICONS[name.split('.').pop().toLowerCase()] || '📄'; }
-    const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp'];
-    // Audio / video extensions served inline via /api/file?raw=1 with the
-    // correct Content-Type (see jupyter_ext MEDIA_CONTENT_TYPES).
-    const AUDIO_EXTS = ['.mp3', '.wav', '.ogg', '.oga', '.m4a', '.aac', '.flac', '.opus'];
-    const VIDEO_EXTS = ['.mp4', '.m4v', '.webm', '.ogv', '.mov'];
-
-    /** Build the raw-stream URL for a workspace-absolute path. */
-    function apiRawUrl(workspacePath) {
-        return `${BASE}/api/file?path=${encodeURIComponent(workspacePath)}&raw=1`;
-    }
-
-    /** Resolve a relative path (as it appears in a markdown link/image)
-     *  against a workspace-absolute directory. Returns the resolved
-     *  workspace path, or null if the input is an external URL / hash / etc. */
-    function resolveRelPath(relPath, fileDir) {
-        if (!relPath) return null;
-        if (/^[a-z][a-z0-9+.-]*:/i.test(relPath)) return null; // http:, mailto:, data:
-        if (relPath.startsWith('#') || relPath.startsWith('/')) return null;
-        const parts = (fileDir ? fileDir.split('/') : []).filter(Boolean);
-        const stripped = relPath.replace(/^\.\//, '');
-        for (const seg of stripped.split('/')) {
-            if (seg === '' || seg === '.') continue;
-            if (seg === '..') { if (parts.length) parts.pop(); continue; }
-            parts.push(seg);
-        }
-        return parts.join('/');
-    }
-
-    /** Walk the rendered markdown DOM and rewrite relative src/href on
-     *  <img>, <audio>, <video>, <source>, <a> so they resolve to the
-     *  workspace file API. Original values are stashed in data-*-original
-     *  so domToMarkdown can round-trip the clean relative form back. */
-    function rewriteRelativeMediaUrls(rootEl, fileDir) {
-        if (!rootEl) return;
-        rootEl.querySelectorAll('img[src], audio[src], video[src], source[src]').forEach((el) => {
-            const src = el.getAttribute('src') || '';
-            const resolved = resolveRelPath(src, fileDir);
-            if (resolved == null) return;
-            el.setAttribute('data-src-original', src);
-            el.setAttribute('src', apiRawUrl(resolved));
-        });
-        rootEl.querySelectorAll('a[href]').forEach((el) => {
-            const href = el.getAttribute('href') || '';
-            const resolved = resolveRelPath(href, fileDir);
-            if (resolved == null) return;
-            el.setAttribute('data-href-original', href);
-            el.setAttribute('data-workspace-path', resolved);
-        });
-    }
-
     /** Return the workspace dir containing the currently-open file. */
     function currentFileDir() {
         if (!currentFileData || !currentFileData.path) return '';
         const p = currentFileData.path;
         const i = p.lastIndexOf('/');
         return i === -1 ? '' : p.slice(0, i);
-    }
-
-    // === Fetch helpers ===
-    // Normalize backslashes to forward slashes (Windows compat)
-    function normPath(p) { return p ? p.replace(/\\/g, '/') : p; }
-
-    async function fetchTreeLevel(dirPath) {
-        const url = dirPath ? `${BASE}/api/tree?path=${encodeURIComponent(dirPath)}` : `${BASE}/api/tree`;
-        const res = await fetch(url, fetchOpts);
-        if (!res.ok) throw new Error('Failed to load tree');
-        const items = await res.json();
-        items.forEach(item => { item.path = normPath(item.path); });
-        return items;
     }
 
     // === Sidebar tree (unchanged logic) ===
@@ -278,25 +223,6 @@
     let viewMode = localStorage.getItem('finderViewMode') || 'grid'; // 'grid' | 'detail'
     let detailSortKey = 'name'; // 'name' | 'mtime' | 'size' | 'type'
     let detailSortDesc = false;
-
-    function formatFileSize(bytes) {
-        if (bytes == null) return '';
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-    }
-    function formatMtime(ts) {
-        if (!ts) return '';
-        const d = new Date(ts * 1000);
-        const pad = n => String(n).padStart(2, '0');
-        return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    }
-    function fileTypeLabel(item) {
-        if (item.type === 'directory') return '폴더';
-        const ext = item.name.includes('.') ? item.name.split('.').pop().toLowerCase() : '';
-        return ext ? ext.toUpperCase() + ' 파일' : '파일';
-    }
 
     function clearSelection() {
         selectedPaths.clear();
@@ -778,13 +704,6 @@
     const CHUNKED_THRESHOLD = 50 * 1024 * 1024; // Use chunked for files > 50 MB
     const CHUNK_MAX_RETRIES = 3;
     const MAX_UPLOAD_FILES = 100000; // Max files per upload to prevent browser crash
-
-    function formatSize(bytes) {
-        if (bytes >= 1024 ** 3) return (bytes / 1024 ** 3).toFixed(1) + ' GB';
-        if (bytes >= 1024 ** 2) return (bytes / 1024 ** 2).toFixed(1) + ' MB';
-        if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
-        return bytes + ' B';
-    }
 
     // Progress bar container (appended to finder)
     const uploadProgressBar = document.createElement('div');
@@ -4142,13 +4061,6 @@
         return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
     }
 
-    function formatByteSize(n) {
-        if (n == null) return '';
-        if (n < 1024) return n + ' B';
-        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-        return (n / (1024 * 1024)).toFixed(1) + ' MB';
-    }
-
     async function openHistoryModal() {
         if (!currentFileData) return;
         // Flush pending edits first so they're visible as the newest snapshot
@@ -5756,4 +5668,3 @@
     // === Init ===
     loadTree();
     syncHashToPath();
-})();

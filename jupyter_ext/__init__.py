@@ -387,6 +387,7 @@ class WorkspaceViewerHandler(BaseHandler):
         viewer_base = ujoin(base_url, "claude-notebook")
         html = STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
         html = html.replace('href="/style.css"', f'href="{viewer_base}/static/style.css"')
+        html = html.replace('src="/keyboard-guard.js"', f'src="{viewer_base}/static/keyboard-guard.js"')
         html = html.replace('src="/app.js"', f'src="{viewer_base}/static/app.js"')
         xsrf = self.get_xsrf_string()
         html = self.inject_script(
@@ -405,6 +406,7 @@ class WorkspaceTerminalHandler(BaseHandler):
         viewer_base = ujoin(base_url, "claude-notebook")
         html = STATIC_DIR.joinpath("terminal.html").read_text(encoding="utf-8")
         html = html.replace('href="terminal.css"', f'href="{viewer_base}/static/terminal.css"')
+        html = html.replace('src="keyboard-guard.js"', f'src="{viewer_base}/static/keyboard-guard.js"')
         html = html.replace('src="terminal.js"', f'src="{viewer_base}/static/terminal.js"')
         xsrf = self.get_xsrf_string()
         html = self.inject_script(
