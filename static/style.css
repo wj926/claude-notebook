@@ -869,6 +869,38 @@ button:focus-visible,
     margin: 8px 0;
 }
 
+/* Resizable image wrapper inside the Notion editor.
+   The browser's native CSS resize handle (bottom-right corner) is used —
+   no JS needed for the actual drag. The wrapper is contenteditable=false
+   so the caret can sit before/after but not inside, treating the image
+   as an atomic inline node. The contained <img> fills the wrapper at
+   100% so the aspect ratio is preserved as the user drags. */
+.notion-editor .img-wrap,
+.markdown-body .img-wrap {
+    display: inline-block;
+    resize: horizontal;
+    overflow: hidden;
+    max-width: 100%;
+    line-height: 0;
+    vertical-align: middle;
+    border-radius: 4px;
+    margin: 8px 0;
+    position: relative;
+}
+.notion-editor .img-wrap > img,
+.markdown-body .img-wrap > img {
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 0;
+    border-radius: inherit;
+    pointer-events: none;  /* clicks fall through to the wrapper for resize */
+}
+.notion-editor .img-wrap:hover {
+    outline: 2px solid var(--accent, #2383e2);
+    outline-offset: 2px;
+}
+
 /* Image viewer */
 .image-viewer {
     text-align: center;

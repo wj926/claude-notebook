@@ -82,6 +82,10 @@ export function initNotion(deps) {
 // user types a space. If any matches, we transform the block in place
 // and strip the shortcut characters.
 function detectBlockShortcut(text) {
+    // contenteditable normalizes trailing spaces to U+00A0 (&nbsp;) so the
+    // user-typed space at end of a shortcut comes back as '\u00A0'. Treat
+    // nbsp the same as a regular space so '[] ' / '# ' / etc still match.
+    text = text.replace(/\u00A0/g, ' ');
     if (text === '# ') return { tag: 'h1' };
     if (text === '## ') return { tag: 'h2' };
     if (text === '### ') return { tag: 'h3' };
@@ -1056,15 +1060,11 @@ function commitMentionPicker() {
     for (let i = 0; i < toDelete; i++) document.execCommand('delete');
     const mdSnippet = mentionInsertFor(item.category, item.name);
     if (item.category === 'image') {
-        // Markdown image — convert to an <img> node so it renders right
-        // now (marked would also produce this but doing it inline lets us
-        // pre-apply the API URL, so no flicker).
-        const img = document.createElement('img');
-        img.setAttribute('alt', item.name.replace(/\.[^.]+$/, ''));
-        img.setAttribute('data-src-original', item.name);
-        const resolved = resolveRelPath(item.name, fileDir);
-        img.setAttribute('src', resolved != null ? apiRawUrl(resolved) : item.name);
-        insertNodeAtCaret(img, editorEl);
+        // Wrap the image so the user can drag the bottom-right corner to
+        // resize it (CSS resize:horizontal on the wrapper). Pre-applying
+        // the API URL avoids a render flash compared to letting marked
+        // handle it.
+        insertNodeAtCaret(buildResizableImg(item.name, fileDir), editorEl);
     } else if (item.category === 'audio' || item.category === 'video') {
         const tag = item.category;
         const media = document.createElement(tag);
@@ -1075,11 +1075,60 @@ function commitMentionPicker() {
         media.setAttribute('src', resolved != null ? apiRawUrl(resolved) : item.name);
         insertNodeAtCaret(media, editorEl);
     } else {
-        // Plain file — insert a regular markdown link via execCommand so it
-        // slots into whatever text/block the caret is in.
-        document.execCommand('insertText', false, mdSnippet);
+        // Plain file — insert a real <a> element so the contenteditable
+        // shows a clickable link instead of literal "[name](path)" text.
+        const a = document.createElement('a');
+        a.href = item.name;
+        a.setAttribute('data-href-original', item.name);
+        a.textContent = item.name.replace(/\.[^.]+$/, '') || item.name;
+        insertNodeAtCaret(a, editorEl);
+        // Caret should land right after the link with a space so the user
+        // can keep typing without bumping into the link.
+        document.execCommand('insertText', false, ' ');
     }
     scheduleSave();
+}
+
+/** Build a `<span class="img-wrap"><img></span>` ready for the editor.
+ *  The wrapper's CSS resize:horizontal lets the user drag the bottom-right
+ *  corner to change width; the img inside fills the wrapper at 100%. */
+function buildResizableImg(name, fileDir) {
+    const wrap = document.createElement('span');
+    wrap.className = 'img-wrap';
+    wrap.setAttribute('contenteditable', 'false');
+    const img = document.createElement('img');
+    img.setAttribute('alt', name.replace(/\.[^.]+$/, ''));
+    img.setAttribute('data-src-original', name);
+    const resolved = resolveRelPath(name, fileDir);
+    img.setAttribute('src', resolved != null ? apiRawUrl(resolved) : name);
+    wrap.appendChild(img);
+    return wrap;
+}
+
+/** Walk every <img> in the editor and (a) wrap any unwrapped ones in
+ *  .img-wrap so the resize affordance is uniform, (b) restore the
+ *  wrapper's width from a width attribute on the img if present (the
+ *  HTML form `<img width="300">` we serialize on save). */
+function rehydrateImageResize(editor) {
+    if (!editor) return;
+    editor.querySelectorAll('img').forEach((img) => {
+        let wrap = img.parentElement;
+        if (!wrap || !wrap.classList.contains('img-wrap')) {
+            wrap = document.createElement('span');
+            wrap.className = 'img-wrap';
+            wrap.setAttribute('contenteditable', 'false');
+            img.replaceWith(wrap);
+            wrap.appendChild(img);
+        }
+        // Width attribute (or pixel width on the img) → wrapper width
+        const w = img.getAttribute('width') || img.style.width;
+        if (w) {
+            const parsed = /^\d+$/.test(w) ? w + 'px' : w;
+            wrap.style.width = parsed;
+            img.removeAttribute('width');
+            img.style.removeProperty('width');
+        }
+    });
 }
 /** Insert a DOM node at the current caret and leave the caret just after
  *  it. Used for @-picker media insertions where the node is the payload. */
@@ -1740,6 +1789,7 @@ function setupNotionEditor(editor) {
         previewViewToggle.textContent = 'Text';
         previewViewToggle.title = 'Switch to plain text view';
     }
+    rehydrateImageResize(editor);
     editor.setAttribute('contenteditable', 'true');
     editor.setAttribute('spellcheck', 'false');
 

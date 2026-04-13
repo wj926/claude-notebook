@@ -119,6 +119,25 @@ export function inlineToMd(el) {
                     out += `<span class="math-inline" data-tex="${escHtml(tex)}">$${tex}$</span>`;
                     break;
                 }
+                // Resizable image wrapper (.img-wrap) — extract the inner
+                // <img> and serialize as inline HTML so the user-set width
+                // survives a save round-trip.
+                if (node.classList && node.classList.contains('img-wrap')) {
+                    const innerImg = node.querySelector(':scope > img');
+                    if (innerImg) {
+                        const alt = innerImg.getAttribute('alt') || '';
+                        const src = innerImg.getAttribute('data-src-original') || innerImg.getAttribute('src') || '';
+                        const w = node.style.width;  // set by user dragging the resize handle
+                        if (w) {
+                            const px = parseInt(w, 10);
+                            const widthAttr = Number.isFinite(px) && px > 0 ? ` width="${px}"` : '';
+                            out += `<img alt="${escHtml(alt)}" src="${src}"${widthAttr}>`;
+                        } else {
+                            out += `![${alt}](${src})`;
+                        }
+                    }
+                    break;
+                }
                 // Preserve color / background spans as inline HTML —
                 // style attribute passes through verbatim so marked.js
                 // re-renders the color on reload.
