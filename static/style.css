@@ -960,6 +960,22 @@ button:focus-visible,
     height: calc(100dvh - 80px);
     border: 0;
     background: #525659;
+    display: block;
+}
+.pdf-fallback {
+    padding: 40px;
+    text-align: center;
+    color: var(--text-secondary);
+    background: var(--bg);
+}
+.pdf-fallback a {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 8px 20px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 6px;
+    text-decoration: none;
 }
 
 /* XLSX preview — multi-sheet read-only table. */

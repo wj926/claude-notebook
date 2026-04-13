@@ -402,11 +402,26 @@ const contentEl = document.getElementById('content');
             }
 
             if (PDF_EXTS.includes(ext)) {
-                // Native browser PDF viewer (works on iOS Safari + desktop).
-                // raw=1 makes the server stream with Content-Type: application/pdf.
+                // Native browser PDF viewer. <object> has the widest
+                // cross-browser support for inline PDFs; on environments
+                // that refuse to render inline (some iOS Safari builds),
+                // the fallback <a> inside the <object> shows a download
+                // link instead of a blank frame.
+                // Needs the server to serve `.pdf` with Content-Type:
+                // application/pdf — make sure Jupyter has been restarted
+                // after the MEDIA_CONTENT_TYPES change or the file will
+                // arrive as application/octet-stream and the browser will
+                // force-download no matter what tag we use.
                 const pdfUrl = `${BASE}/api/file?path=${encodeURIComponent(path)}&raw=1`;
+                const fname = parts[parts.length - 1];
                 previewBody.innerHTML =
-                    `<iframe class="pdf-frame" src="${pdfUrl}" title="${escHtml(parts[parts.length - 1])}"></iframe>`;
+                    `<object class="pdf-frame" data="${pdfUrl}" type="application/pdf">
+                        <div class="pdf-fallback">
+                            <p><strong>${escHtml(fname)}</strong></p>
+                            <p>이 브라우저에서는 인라인 PDF 미리보기를 지원하지 않습니다.</p>
+                            <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">새 창에서 열기</a>
+                        </div>
+                    </object>`;
                 return;
             }
 
