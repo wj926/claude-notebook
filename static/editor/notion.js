@@ -1044,13 +1044,16 @@ function commitMentionPicker() {
     const items = mentionFiltered();
     const item = items[_mentionState.index];
     if (!item) { closeMentionPicker(); return; }
-    // Strip the typed "@filter" first so the insertion replaces it.
+    // Capture all picker state up-front: deleting the typed "@filter"
+    // below fires `input` events that re-run updateMentionPickerFilter,
+    // which closes the picker (no `@` left in the text) and nulls out
+    // _mentionState before we can read .editor / .filter from it.
     const filter = _mentionState.filter;
-    const toDelete = filter.length + 1; // include the @
-    for (let i = 0; i < toDelete; i++) document.execCommand('delete');
     const editorEl = _mentionState.editor;
     const fileDir = getFileDir();
     closeMentionPicker();
+    const toDelete = filter.length + 1; // include the @
+    for (let i = 0; i < toDelete; i++) document.execCommand('delete');
     const mdSnippet = mentionInsertFor(item.category, item.name);
     if (item.category === 'image') {
         // Markdown image — convert to an <img> node so it renders right
