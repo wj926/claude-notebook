@@ -7,6 +7,7 @@ import { FileViewerInstance } from './viewers/file-instance.js';
 import { initTree, loadTree } from './ui/tree.js';
 import { initSidebar } from './ui/sidebar.js';
 import { init as initTermList } from './terminals/term-list.js';
+import { init as initSshChip } from './ssh/ssh-chip.js';
 
 const JUPYTER_BASE = window.__JUPYTER_BASE !== undefined ? window.__JUPYTER_BASE : BASE;
 
@@ -92,6 +93,9 @@ if (splitBtn) {
     layout.addLeafAfter(activeId);
   });
 }
+
+// SSH 칩 (topbar ssh-slot)
+initSshChip(document.getElementById('ssh-slot'));
 
 // Terminals sidebar section — 5s polling + pending command UI
 initTermList({
