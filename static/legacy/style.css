@@ -30,33 +30,47 @@
         'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji';
 }
 
-/* ===== Unified thin scrollbars =====
-   Gives Windows Chrome/Edge the same low-profile look as macOS overlay
-   scrollbars. 8px thumb, transparent track, rounded, subtle hover. */
+/* ===== Visible scrollbars (사용자 가시성 우선) =====
+   14px 굵게 + 진한 회색 thumb. light/dark 둘 다 흑백 위계 유지. */
 *::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 14px;
+    height: 14px;
 }
 *::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 0;
 }
 *::-webkit-scrollbar-thumb {
-    background: rgba(55, 53, 47, 0.18);
-    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.45);
+    border-radius: 7px;
     border: 2px solid transparent;
     background-clip: content-box;
     transition: background 0.15s;
 }
 *::-webkit-scrollbar-thumb:hover {
-    background: rgba(55, 53, 47, 0.4);
+    background: rgba(0, 0, 0, 0.7);
     background-clip: content-box;
 }
 *::-webkit-scrollbar-corner {
     background: transparent;
 }
+[data-theme="dark"] *::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.08);
+}
+[data-theme="dark"] *::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.45);
+    background-clip: content-box;
+}
+[data-theme="dark"] *::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.75);
+    background-clip: content-box;
+}
 * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(55, 53, 47, 0.22) transparent;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(0, 0, 0, 0.5) rgba(0, 0, 0, 0.06);
+}
+[data-theme="dark"] * {
+    scrollbar-color: rgba(255, 255, 255, 0.5) rgba(255, 255, 255, 0.08);
 }
 
 html, body {

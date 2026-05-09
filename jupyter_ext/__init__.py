@@ -406,6 +406,7 @@ class WorkspaceViewerHandler(BaseHandler):
             __FOCUS=focus or "",
         )
         self.set_header("Content-Type", "text/html; charset=utf-8")
+        self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.finish(html)
 
 
@@ -430,6 +431,7 @@ class WorkspaceTerminalHandler(BaseHandler):
             __FOCUS=focus or "",
         )
         self.set_header("Content-Type", "text/html; charset=utf-8")
+        self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.finish(html)
 
 
@@ -481,6 +483,7 @@ class LegacyFilesHandler(BaseHandler):
             __XSRF_TOKEN=xsrf,
         )
         self.set_header("Content-Type", "text/html; charset=utf-8")
+        self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
         self.finish(html)
 
 
@@ -537,9 +540,17 @@ class WorkspaceFileHandler(BaseHandler):
             or ext in IMAGE_CONTENT_TYPES
             or ext in MEDIA_CONTENT_TYPES
         ):
+            # raw=1 으로 텍스트 계열 미리보기 (html, svg) 도 inline 렌더 가능하게
+            # 적절한 Content-Type 매핑. 모르는 ext 는 octet-stream → 다운로드.
+            text_raw_types = {
+                '.html': 'text/html; charset=utf-8',
+                '.htm':  'text/html; charset=utf-8',
+                '.svg':  'image/svg+xml',
+            }
             ct = (
                 IMAGE_CONTENT_TYPES.get(ext)
                 or MEDIA_CONTENT_TYPES.get(ext)
+                or text_raw_types.get(ext)
                 or 'application/octet-stream'
             )
             self.set_header("Content-Type", ct)

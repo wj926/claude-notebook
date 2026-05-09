@@ -25,10 +25,14 @@ function safe(name, fn) {
 }
 
 // localStorage 에서 탭/leaf 상태 먼저 복원 — layout.init() 의 initial render
-// 가 복원된 상태로 그려져야 F5 후에 탭 그대로 보임. 복원 결과는 아래 boot
-// 시점에서 "Files 자동 오픈" 가드에 사용됨.
+// 가 복원된 상태로 그려져야 F5 후에 탭 그대로 보임.
 const layoutRestored = layout.restoreFromStorage();
 const tabsRestored = tabStore.restoreFromStorage();
+
+// IMPORTANT: mount-tab 리스너는 layout.init() 보다 먼저 등록해야 함. init 의
+// initial render 가 복원된 탭에 대해 mount-tab 을 dispatch 하므로, 늦게 등록
+// 하면 F5 후 iframe/터미널이 안 만들어짐 (회귀 발견).
+document.addEventListener('mount-tab', onMountTab);
 
 safe('layout', () => layout.init(document.getElementById('main')));
 safe('initSidebar', initSidebar);
@@ -59,7 +63,9 @@ const openFileTab = (path) => {
     const ifr = document.querySelector(
       `[data-tab-content-id="${filesTab.id}"] iframe[data-files-frame]`
     );
-    if (!ifr || !ifr.contentWindow || typeof ifr.contentWindow.__cnOpenFile !== 'function') {
+    if (!ifr || !ifr.contentWindow ||
+        !ifr.contentWindow.__cnReady ||
+        typeof ifr.contentWindow.__cnOpenFile !== 'function') {
       return false;
     }
     try { ifr.contentWindow.__cnOpenFile(path); return true; } catch (_) { return false; }
@@ -136,7 +142,8 @@ function syncPreviewBtns() {
   const leaf = layout.getLeavesInVisualOrder().find(l => l.id === activeLeafId);
   const isFiletab = leaf && leaf.activeTabId && (() => {
     const t = tabStore.getTab(leaf.activeTabId);
-    return t && t.kind === 'file';
+    // 우리는 B 방향으로 'files' kind (legacy iframe) 만 사용 — 'file' 은 dead path.
+    return t && t.kind === 'files';
   })();
   if (previewHistory) previewHistory.style.display = isFiletab ? '' : 'none';
   if (previewHelp)    previewHelp.style.display    = isFiletab ? '' : 'none';
@@ -155,7 +162,7 @@ safe('initTree', () => {
 });
 
 // Mount tab → create instance, mount on host element ONCE.
-document.addEventListener('mount-tab', e => {
+function onMountTab(e) {
   const { tab, hostEl } = e.detail;
 
   // 'files' kind: legacy file 브라우저 (Notion 식 + 폴더 그리드 + 토글 등 기존 기능 풀세트) 를 iframe 으로
@@ -163,9 +170,36 @@ document.addEventListener('mount-tab', e => {
     if (hostEl.querySelector('iframe[data-files-frame]')) return;  // 이미 마운트됨
     const ifr = document.createElement('iframe');
     ifr.dataset.filesFrame = '1';
+    ifr.dataset.tabId = tab.id;  // postMessage e.source 역매핑용
     ifr.src = `${BASE}/legacy-files`;
     ifr.style.cssText = 'width:100%;height:100%;border:0;display:block;background:var(--bg)';
     hostEl.appendChild(ifr);
+    // F5 후 복원: tab 에 currentFile 저장돼 있으면 iframe 부팅 후 자동 오픈.
+    // iframe.src 가 막 set 된 직후라 load 가 비동기로 발화 — listener 등록 시점
+    // 까지는 안 fire 됐어야 하지만 안전하게 contentWindow 도 같이 폴링.
+    if (tab.currentFile) {
+      const restorePath = tab.currentFile;
+      let done = false;
+      const tryRestore = () => {
+        if (done) return true;
+        try {
+          const cw = ifr.contentWindow;
+          if (cw?.__cnReady && typeof cw.__cnOpenFile === 'function') {
+            cw.__cnOpenFile(restorePath);
+            done = true;
+            return true;
+          }
+        } catch (_) {}
+        return false;
+      };
+      let tries = 0;
+      const tick = () => {
+        if (tryRestore() || ++tries > 60) return;
+        setTimeout(tick, 100);
+      };
+      tick();
+      ifr.addEventListener('load', () => { tries = 0; tick(); }, { once: true });
+    }
     return;
   }
 
@@ -188,7 +222,7 @@ document.addEventListener('mount-tab', e => {
     inst.mount(hostEl, tab.contentRef);
   }
   inst._mountedHost = hostEl;
-});
+}
 
 // Tab close → dispose instance
 tabStore.onChange(() => {
@@ -273,6 +307,20 @@ safe('initTermList', () => initTermList({
   listEl: document.getElementById('term-list'),
   addBtn: document.getElementById('new-term-btn'),
 }));
+
+// 'files' iframe 의 legacy app 이 파일 열 때 알림 → tab.currentFile persist
+// → F5 후 자동 복원 (mount-tab 의 ifr.load 핸들러).
+window.addEventListener('message', (e) => {
+  if (!e.data || e.data.type !== 'cn-file-opened') return;
+  // e.source 로 어느 iframe 인지 역매핑 (codex 추천)
+  for (const ifr of document.querySelectorAll('iframe[data-files-frame]')) {
+    if (ifr.contentWindow === e.source) {
+      const tabId = ifr.dataset.tabId;
+      if (tabId) tabStore.updateTab(tabId, { currentFile: e.data.path });
+      break;
+    }
+  }
+});
 
 // Spec §5.7.4 S7 — 모든 'files' iframe 의 unsaved 검사 후 confirm prompt.
 // legacy 자체 beforeunload 는 keepalive flush 만 하고 confirm 안 띄우므로

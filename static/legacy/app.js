@@ -137,6 +137,11 @@ const contentEl = document.getElementById('content');
         finder.style.display = 'none';
         previewHistory.style.display = 'none';
         previewHelp.style.display = 'none';
+        // outer (multi-tab unified) 페이지에 현재 열린 파일 알림 → tabStore 의
+        // 'files' 탭에 currentFile 로 저장 → F5 시 자동 복원 가능.
+        try {
+            window.parent?.postMessage({ type: 'cn-file-opened', path }, '*');
+        } catch (_) {}
         if (previewViewToggle) {
             previewViewToggle.style.display = 'none';
             previewViewToggle.textContent = 'Text';
@@ -430,6 +435,25 @@ const contentEl = document.getElementById('content');
                 return;
             }
 
+            // .html / .htm — sandboxed iframe 으로 inline 렌더링. allow-scripts
+            // 없음 (XSS 차단), allow-same-origin 도 X (workspace 자원 격리).
+            // Source view 가 필요하면 사용자가 .txt 로 보거나 raw 링크 사용.
+            if (ext === '.html' || ext === '.htm') {
+                const htmlUrl = `${BASE}/api/file?path=${encodeURIComponent(path)}&raw=1`;
+                const fname = parts[parts.length - 1];
+                previewBody.innerHTML =
+                    `<iframe class="html-frame" src="${htmlUrl}" sandbox=""
+                             style="width:100%;height:100%;border:0;background:#fff"
+                             title="${escHtml(fname)}"></iframe>
+                     <div style="position:absolute;top:8px;right:8px;font-size:12px">
+                       <a href="${htmlUrl}" target="_blank" rel="noopener noreferrer"
+                          style="background:rgba(0,0,0,0.05);padding:4px 8px;border-radius:4px;color:inherit;text-decoration:none">
+                         새 창에서 열기 (스크립트 활성)
+                       </a>
+                     </div>`;
+                return;
+            }
+
             const res = await fetch(`${BASE}/api/file?path=${encodeURIComponent(path)}`, fetchOpts);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
@@ -515,6 +539,9 @@ const contentEl = document.getElementById('content');
     initTree({ openFile: openPreview, openDir: loadFinderGrid });
     loadTree();
     syncHashToPath();
+    // 외부 (outer multi-tab) 가 __cnOpenFile 호출 시 충돌 회피용 ready 플래그.
+    // syncHashToPath 가 끝난 후에만 outer 의 restore 가 실행되도록.
+    try { window.__cnReady = true; } catch (_) {}
 
     // Outer (multi-tab unified) 페이지에서 OUTER 사이드바/finder 클릭 시 이
     // iframe 의 file 미리보기를 직접 띄우도록 노출. hash 기반보다 안전 —
@@ -523,8 +550,10 @@ const contentEl = document.getElementById('content');
     try {
         window.__cnOpenFile = (path) => {
             if (typeof path !== 'string' || !path) return;
-            const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-            loadFinderGrid(dir);
+            // loadFinderGrid 호출하면 onNavigate → updateHash → hashchange →
+            // syncHashToPath 가 preview 를 즉시 closePreviewFn 으로 덮어쓰는
+            // 회귀 발견. 외부에서 파일 열기는 openPreview 만으로 충분 (parent
+            // finder 표시는 사용자가 다시 보고 싶을 때 finder 열면 됨).
             openPreview(path);
         };
         // outer 페이지가 unsaved 가드 검사할 때 사용

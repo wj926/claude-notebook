@@ -44,6 +44,14 @@ export function openTab({ kind, contentRef, leafId }) {
 
 export function closeTab(id) { tabs.delete(id); fire(); }
 export function getTab(id) { return tabs.get(id); }
+export function updateTab(id, patch) {
+  const t = tabs.get(id); if (!t) return;
+  Object.assign(t, patch);
+  // persist 만 — fire() 호출하면 layout.render 가 mountEl.innerHTML='' 으로
+  // iframe 을 잠시 detach 하면서 in-flight fetch 가 ERR_ABORTED 됨 (회귀
+  // 발견). currentFile 같은 메타데이터 변경은 시각적 재렌더 불필요.
+  persist();
+}
 export function moveTab(id, targetLeafId, _index) {
   // Spec 2 (DnD) 가 호출. Spec 1 미사용.
   const t = tabs.get(id); if (!t) return;
