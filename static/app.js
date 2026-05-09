@@ -8,6 +8,11 @@ import { initTree, loadTree } from './ui/tree.js';
 import { initSidebar } from './ui/sidebar.js';
 import { init as initTermList } from './terminals/term-list.js';
 import { init as initSshChip } from './ssh/ssh-chip.js';
+// §5.7 보존: finder / history / file-ops / keyboard-help
+import { initFinder, loadFinderGrid, getCurrentDir } from './ui/finder.js';
+import { initFileOpsButtons } from './ui/file-ops.js';
+import { initKeyboardHelp } from './editor/keyboard-help.js';
+import { initHistoryModal } from './ui/history-modal.js';
 
 const JUPYTER_BASE = window.__JUPYTER_BASE !== undefined ? window.__JUPYTER_BASE : BASE;
 
@@ -18,6 +23,73 @@ layout.init(document.getElementById('main'));
 
 // Sidebar (existing module — needs the IDs we put in index.html)
 initSidebar();
+
+// §5.7 보존 모듈 초기화 ─────────────────────────────────────────────────────
+
+// openFileTab: finder / 여러 모듈에서 파일 여는 공통 핸들러
+const openFileTab = (path) => {
+  const leafId = layout.getActiveLeafId();
+  const tabId = tabStore.openTab({ kind: 'file', contentRef: path, leafId });
+  layout.activateTab(tabId);
+};
+
+// Finder — #finder DOM 은 index.html에 hidden 으로 존재 (tree.js 가 탐색 역할)
+// openFile: 파일 클릭 시 탭으로 열기, onNavigate: 디렉토리 탐색 유지
+initFinder({ openFile: openFileTab, onNavigate: loadFinderGrid });
+
+// File ops 버튼 (#newFileBtn / #newFolderBtn) — finder toolbar 에 있음
+initFileOpsButtons({
+  getCurrentDir,
+  onChanged: () => loadFinderGrid(getCurrentDir()),
+});
+
+// 키보드 단축키 help modal (#helpOverlay / #previewHelp 버튼)
+initKeyboardHelp();
+
+// Snapshot history modal (#historyOverlay / #previewHistory 버튼)
+// getFile: 현재 활성 파일 탭의 { path, content, extension } 반환
+initHistoryModal({
+  getFile: () => {
+    const activeLeafId = layout.getActiveLeafId();
+    const leaf = layout.getLeavesInVisualOrder().find(l => l.id === activeLeafId);
+    if (!leaf || !leaf.activeTabId) return null;
+    const tab = tabStore.getTab(leaf.activeTabId);
+    if (!tab || tab.kind !== 'file') return null;
+    // instances Map 에서 FileViewerInstance 를 통해 현재 파일 정보 가져오기
+    const inst = instances.get(tab.id);
+    if (!inst || !inst._currentFile) return null;
+    return inst._currentFile; // { path, content, extension }
+  },
+  onRestored: (content) => {
+    // 복원 후 활성 파일 탭 리로드
+    const activeLeafId = layout.getActiveLeafId();
+    const leaf = layout.getLeavesInVisualOrder().find(l => l.id === activeLeafId);
+    if (!leaf || !leaf.activeTabId) return;
+    const inst = instances.get(leaf.activeTabId);
+    if (inst && typeof inst.mount === 'function' && inst.path) {
+      inst.mount(inst.dom, inst.path);
+    }
+    console.log('[history] restored, content length:', content?.length);
+  },
+});
+
+// 파일 탭 활성화 시 previewHistory / previewHelp 버튼 표시
+const previewHistory = document.getElementById('previewHistory');
+const previewHelp    = document.getElementById('previewHelp');
+function syncPreviewBtns() {
+  const activeLeafId = layout.getActiveLeafId();
+  const leaf = layout.getLeavesInVisualOrder().find(l => l.id === activeLeafId);
+  const isFiletab = leaf && leaf.activeTabId && (() => {
+    const t = tabStore.getTab(leaf.activeTabId);
+    return t && t.kind === 'file';
+  })();
+  if (previewHistory) previewHistory.style.display = isFiletab ? '' : 'none';
+  if (previewHelp)    previewHelp.style.display    = isFiletab ? '' : 'none';
+}
+layout.onChange(syncPreviewBtns);
+tabStore.onChange(syncPreviewBtns);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Tree — uses #tree
 initTree({
