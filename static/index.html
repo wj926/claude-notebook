@@ -19,23 +19,22 @@
 </head>
 <body>
   <header id="topbar">
+    <button id="sidebarToggle" type="button" aria-label="사이드바 토글" title="사이드바 보이기/숨기기">&#9776;</button>
     <span class="brand">Claude Notebook</span>
     <span id="ssh-slot"></span>
     <span class="spacer"></span>
-    <!-- previewHelp / previewHistory: 파일 탭 열릴 때 app.js가 display 조작 -->
     <button id="previewHelp" type="button" title="Keyboard shortcuts (?)" style="display:none;">?</button>
     <button id="previewHistory" type="button" title="History" style="display:none;"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/></svg></button>
     <button id="files-btn" type="button" title="Files 브라우저 탭 열기">📁 Files</button>
     <button id="split-btn" type="button">&#x229F; Split</button>
-    <button id="sidebarToggle" type="button" aria-label="사이드바 토글">&#9776;</button>
   </header>
 
   <div id="sidebarOverlay" hidden></div>
 
   <main id="app">
     <aside id="sidebar">
-      <!-- 기존 sidebar.js 와 호환 위해 ID 유지하지만 통합 페이지에선 사용 안 함 (topbar ☰ + Theme 가 그 역할) -->
-      <header class="sidebar-head" hidden>
+      <!-- sidebar.js 호환용 — 통합 페이지에선 보이지 않음 (style 로 강제 숨김) -->
+      <header class="sidebar-head" style="display:none">
         <button id="sidebarClose" type="button" aria-label="닫기">&times;</button>
         <button id="terminalBtn" type="button">Terminal</button>
         <button id="themeToggleBtn" type="button">Theme</button>
