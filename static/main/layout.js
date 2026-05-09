@@ -210,21 +210,50 @@ function render() {
     }
 
     const body = sec.querySelector('.leaf-body');
-    const activeTab = tabStore.tabsForLeaf(leaf.id).find(t => t.id === leaf.activeTabId);
-    const newTabId = activeTab ? activeTab.id : null;
-    // Idempotency: 활성 탭이 바뀌었을 때만 mount-tab dispatch (xterm/file 깜빡임 방지)
-    if (sec._lastTabId !== newTabId) {
-      sec._lastTabId = newTabId;
-      if (activeTab) {
-        body.innerHTML = '';
+    const tabsHere = tabStore.tabsForLeaf(leaf.id);
+    const activeTab = tabsHere.find(t => t.id === leaf.activeTabId);
+
+    // 1) 더 이상 leaf 에 없는 탭의 컨테이너 제거
+    const validIds = new Set(tabsHere.map(t => t.id));
+    body.querySelectorAll('[data-tab-content-id]').forEach(child => {
+      if (!validIds.has(child.dataset.tabContentId)) child.remove();
+    });
+
+    // 2) leaf-empty placeholder 토글
+    let emptyEl = body.querySelector('.leaf-empty');
+    if (!activeTab && tabsHere.length === 0) {
+      if (!emptyEl) {
+        emptyEl = document.createElement('div');
+        emptyEl.className = 'leaf-empty';
+        emptyEl.style.cssText = 'padding:40px;text-align:center;color:var(--text-secondary);font-style:italic';
+        emptyEl.textContent = '사이드바에서 터미널이나 파일을 선택하세요. 또는 + 버튼으로 새 터미널 추가.';
+        body.appendChild(emptyEl);
+      } else {
+        emptyEl.style.display = '';
+      }
+    } else if (emptyEl) {
+      emptyEl.style.display = 'none';
+    }
+
+    // 3) 모든 탭 컨테이너의 가시성 토글 — 활성만 보이게
+    tabsHere.forEach(t => {
+      let container = body.querySelector(`[data-tab-content-id="${t.id}"]`);
+      const isActive = activeTab && t.id === activeTab.id;
+      if (!container && isActive) {
+        // 활성 탭이고 아직 컨테이너 없음 → 새로 만들고 mount-tab dispatch
+        container = document.createElement('div');
+        container.dataset.tabContentId = t.id;
+        container.style.cssText = 'height:100%;width:100%;';
+        body.appendChild(container);
         sec.dispatchEvent(new CustomEvent('mount-tab', {
-          detail: { tab: activeTab, hostEl: body, leafId: leaf.id },
+          detail: { tab: t, hostEl: container, leafId: leaf.id },
           bubbles: true,
         }));
-      } else {
-        body.innerHTML = '<div class="leaf-empty" style="padding:40px;text-align:center;color:var(--text-secondary,#888);font-style:italic">사이드바에서 터미널이나 파일을 선택하세요</div>';
+      } else if (container) {
+        container.style.display = isActive ? '' : 'none';
       }
-    }
+    });
+
     mountEl.appendChild(sec);
 
     // 다음 leaf 와의 사이에 splitter 삽입

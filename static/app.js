@@ -102,10 +102,16 @@ initTree({
 });
 loadTree();
 
-// Mount tab → create instance, mount on host element
+// Mount tab → create instance, mount on host element ONCE.
+// layout.js 가 hostEl 을 영구 컨테이너로 만들어 dispatch 함 — 멱등 처리.
 document.addEventListener('mount-tab', e => {
   const { tab, hostEl } = e.detail;
   let inst = instances.get(tab.id);
+  if (inst && inst._mountedHost === hostEl) {
+    // 이미 같은 hostEl 에 마운트됨 → fit 만
+    inst.fit?.();
+    return;
+  }
   if (!inst) {
     if (tab.kind === 'term') {
       inst = new TerminalInstance({ name: tab.contentRef });
@@ -114,12 +120,13 @@ document.addEventListener('mount-tab', e => {
     }
     instances.set(tab.id, inst);
   }
-  hostEl.innerHTML = '';
+  // 첫 마운트
   if (tab.kind === 'term') {
     inst.mount(hostEl);
   } else {
     inst.mount(hostEl, tab.contentRef);
   }
+  inst._mountedHost = hostEl;
 });
 
 // Tab close → dispose instance
