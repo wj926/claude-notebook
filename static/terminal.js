@@ -831,6 +831,32 @@ function connectTerminal(name) {
             setupScrollLock(viewport);
         }
     }, 60);
+
+    // 5b: input bar, upload, vkb 인스턴스 메서드로 위임
+    const inputBar5b = document.getElementById('termInputBar');
+    const inputField5b = document.getElementById('termInputField');
+    const sendBtn5b = document.getElementById('termInputSend');
+    if (inputField5b) {
+        // attachUpload 먼저 호출해 _pendingFilesRef 확보
+        const fileInput5b = document.getElementById('termFileInput');
+        const pendingCont5b = document.getElementById('termPendingFiles');
+        const attachBtn5b = document.querySelector('.term-attach-btn');
+        if (fileInput5b && pendingCont5b) {
+            currentInstance.attachUpload(fileInput5b, pendingCont5b, attachBtn5b);
+        }
+        currentInstance.attachInputBar(
+            inputBar5b, sendBtn5b, inputField5b,
+            {
+                isMobile,
+                pendingFilesRef: currentInstance._pendingFilesRef,
+                // chat mode intercept: if chatMode is active, delegate to chatSendInput
+                isChatMode: () => chatMode,
+                chatSubmit: () => chatSendInput(),
+            }
+        );
+    }
+    const vkbPanel5b = document.getElementById('vkbPanel');
+    if (vkbPanel5b) currentInstance.attachVKB(vkbPanel5b);
 }
 
 function disconnect() {
@@ -874,34 +900,9 @@ async function sendInput() {
     autoResizeInput();
 }
 
+// [5b] Input listeners moved to TerminalInstance.attachInputBar — called per-connect in connectTerminal.
+// Auto-resize on input still registered globally (no duplication risk, pure UI).
 termInputField.addEventListener('input', autoResizeInput);
-termInputSend.addEventListener('click', sendInput);
-termInputField.addEventListener('keydown', (e) => {
-    // Desktop: Enter = send, Shift+Enter = newline
-    // Mobile: Enter = newline (default), Send button = send
-    if (e.key === 'Enter' && !isMobile && !e.shiftKey) {
-        e.preventDefault();
-        sendInput();
-        return;
-    }
-    if (e.key === 'Tab') {
-        e.preventDefault();
-        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-            currentWs.send(JSON.stringify(["stdin", "\t"]));
-        }
-    }
-    if (e.key === 'c' && e.ctrlKey) {
-        const hasSelection = termInputField.selectionStart !== termInputField.selectionEnd;
-        if (hasSelection) {
-            // Allow default copy behavior
-            return;
-        }
-        // No selection: clear input field only, do NOT send interrupt to terminal
-        e.preventDefault();
-        termInputField.value = '';
-        autoResizeInput();
-    }
-});
 
 // File upload handling
 function renderPendingFiles(container, fileList, attachBtn) {
@@ -928,11 +929,7 @@ function renderPendingFiles(container, fileList, attachBtn) {
     });
 }
 
-termFileInput.addEventListener('change', () => {
-    for (const f of termFileInput.files) termPendingFileList.push(f);
-    termFileInput.value = '';
-    renderPendingFiles(termPendingFiles, termPendingFileList, termAttachBtn);
-});
+// [5b] File input listener moved to TerminalInstance.attachUpload — called per-connect in connectTerminal.
 
 async function uploadPendingFiles(fileList) {
     if (!fileList.length) return null;
@@ -971,45 +968,13 @@ const vkbKeyMap = {
     'F9': '\x1b[20~', 'F10': '\x1b[21~', 'F11': '\x1b[23~', 'F12': '\x1b[24~',
 };
 
+// vkbToggleBtn (panel open/close) is pure UI — keep here.
 vkbToggleBtn.addEventListener('click', () => {
     vkbPanel.classList.toggle('open');
     vkbToggleBtn.classList.toggle('active');
 });
 
-vkbPanel.addEventListener('click', (e) => {
-    const btn = e.target.closest('.vkb-key');
-    if (!btn) return;
-
-    // Handle modifier toggle
-    const mod = btn.dataset.mod;
-    if (mod) {
-        vkbModifiers[mod] = !vkbModifiers[mod];
-        btn.classList.toggle('active', vkbModifiers[mod]);
-        return;
-    }
-
-    // Handle regular key
-    const key = btn.dataset.key;
-    if (!key || !currentWs || currentWs.readyState !== WebSocket.OPEN) return;
-
-    let seq = vkbKeyMap[key] || key;
-
-    // Apply Ctrl modifier: convert character to control code
-    if (vkbModifiers.ctrl && seq.length === 1) {
-        const code = seq.toUpperCase().charCodeAt(0);
-        if (code >= 65 && code <= 90) seq = String.fromCharCode(code - 64);
-    }
-    // Apply Alt modifier: prepend ESC
-    if (vkbModifiers.alt) {
-        seq = '\x1b' + seq;
-    }
-
-    currentWs.send(JSON.stringify(["stdin", seq]));
-
-    // Reset modifiers after key press
-    Object.keys(vkbModifiers).forEach(m => { vkbModifiers[m] = false; });
-    vkbPanel.querySelectorAll('.vkb-mod').forEach(el => el.classList.remove('active'));
-});
+// [5b] vkbPanel key dispatch moved to TerminalInstance.attachVKB — called per-connect in connectTerminal.
 
 // ========== iMESSAGE CHAT ==========
 
