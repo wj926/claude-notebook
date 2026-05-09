@@ -1031,36 +1031,76 @@ def _jupyter_server_extension_paths():
 def _auto_create_terminals(nb_app):
     """Create terminals from saved config on server startup."""
     from tornado.ioloop import IOLoop
+    from .terminals import set_term_host, set_pending, sync_term_hosts, _write_ssh_command, PTY_READY_DELAY_SEC
+    from .hosts import get_host
 
     def _create():
         term_mgr = nb_app.web_app.settings.get('terminal_manager')
         if term_mgr is None:
             return
+        # term-hosts <-> Jupyter live terminals sync
+        sync_term_hosts(term_mgr)
+
         saved = _read_names()
         if not saved:
             return
-        for slot in sorted(saved.keys(), key=lambda x: int(x)):
-            cfg = saved[slot]
+
+        # Defensive parse — skip non-numeric slot keys
+        valid_slots = []
+        for k, v in saved.items():
+            try:
+                int(k)
+            except (TypeError, ValueError):
+                nb_app.log.warning("Skip non-numeric slot key: %r", k)
+                continue
+            valid_slots.append((int(k), k, v))
+
+        migration_dirty = False
+        for _, slot, cfg in sorted(valid_slots, key=lambda x: x[0]):
+            # host_id 마이그레이션 — 없으면 'local' 채우고 영속화 표시
+            if "host_id" not in cfg:
+                cfg["host_id"] = "local"
+                migration_dirty = True
+            host_id = cfg["host_id"]
+            host = get_host(host_id) or get_host("local")
             try:
                 model = term_mgr.create()
                 name = model["name"]
+                set_term_host(name, host_id)
+
+                # remote 호스트면 먼저 ssh 진입
+                if host and host.get("connect"):
+                    IOLoop.current().call_later(
+                        PTY_READY_DELAY_SEC,
+                        _write_ssh_command, term_mgr, name, host["connect"],
+                    )
+
+                # startup command 처리
                 command = cfg.get("command", "")
                 if command:
-                    term = term_mgr.get_terminal(name)
-                    lines = [l for l in command.split("\n") if l.strip()]
-                    for idx, line in enumerate(lines):
-                        def _send_line(t=term, cmd=line):
-                            try:
-                                t.ptyproc.write(cmd + "\r")
-                            except Exception:
-                                pass
-                        IOLoop.current().call_later(1.5 + idx * 3, _send_line)
-                nb_app.log.info("Auto-created terminal %s (slot %s: %s)",
-                                name, slot, cfg.get("display_name", ""))
+                    if host_id == "local":
+                        # 기존 동작 — 자동 입력
+                        term = term_mgr.get_terminal(name)
+                        lines = [l for l in command.split("\n") if l.strip()]
+                        for idx, line in enumerate(lines):
+                            def _send_line(t=term, cmd=line):
+                                try:
+                                    t.ptyproc.write(cmd + "\r")
+                                except Exception:
+                                    pass
+                            IOLoop.current().call_later(1.5 + idx * 3, _send_line)
+                    else:
+                        # remote — 보류 (사용자 클릭 시 실행)
+                        set_pending(name, command)
+
+                nb_app.log.info("Auto-created terminal %s (slot %s: %s host=%s)",
+                                name, slot, cfg.get("display_name", ""), host_id)
             except Exception as e:
                 nb_app.log.warning("Failed to auto-create terminal for slot %s: %s", slot, e)
 
-    # Delay to ensure terminal manager is fully ready
+        if migration_dirty:
+            _write_names(saved)
+
     IOLoop.current().call_later(2, _create)
 
 
@@ -1118,6 +1158,15 @@ def load_jupyter_server_extension(nb_app):
         (ujoin(base_url, r"/claude-notebook/api/hosts/([^/]+)"),         _host_h["HostItemHandler"]),
         (ujoin(base_url, r"/claude-notebook/api/hosts/([^/]+)/test"),    _host_h["HostTestHandler"]),
         (ujoin(base_url, r"/claude-notebook/api/current_host"),          _host_h["CurrentHostHandler"]),
+    ])
+    from .terminals import make_handlers as _make_term_handlers, sync_term_hosts as _sync_term_hosts
+    _term_h = _make_term_handlers(BaseHandler)
+    handlers.extend([
+        (ujoin(base_url, r"/claude-notebook/api/terminals/new"),                  _term_h["NewSshTerminalHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/term-hosts"),                     _term_h["TermHostsHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/term-hosts/([^/]+)/cleanup"),     _term_h["TermDeleteHookHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/pending-commands"),               _term_h["PendingListHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/pending-commands/([^/]+)"),       _term_h["PendingItemHandler"]),
     ])
     nb_app.web_app.add_handlers(".*$", handlers)
     nb_app.log.info("Claude Notebook extension loaded at %s/claude-notebook (workspace: %s)", base_url, workspace)
