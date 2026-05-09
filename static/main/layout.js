@@ -156,7 +156,9 @@ function render() {
       tEl.innerHTML = '<span class="tab-name"></span><span class="tab-close" title="닫기">×</span>';
       tEl.querySelector('.tab-name').textContent = t.contentRef;
       tEl.addEventListener('click', e => {
-        if (e.target.classList.contains('tab-close')) {
+        // closest() 로 X 글리프 외 부위 클릭도 잡음 (hit area)
+        if (e.target.closest('.tab-close')) {
+          e.stopPropagation();
           tabStore.closeTab(t.id);
           // 이 leaf 가 비었으면 자동으로 leaf 도 닫기 (단, 마지막 leaf 는 유지)
           if (tabStore.tabsForLeaf(leaf.id).length === 0 && state.leaves.length > 1) {
