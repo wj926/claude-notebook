@@ -24,19 +24,68 @@ function safe(name, fn) {
   try { fn(); } catch (e) { console.error(`[init] ${name} failed:`, e); }
 }
 
+// localStorage 에서 탭/leaf 상태 먼저 복원 — layout.init() 의 initial render
+// 가 복원된 상태로 그려져야 F5 후에 탭 그대로 보임. 복원 결과는 아래 boot
+// 시점에서 "Files 자동 오픈" 가드에 사용됨.
+const layoutRestored = layout.restoreFromStorage();
+const tabsRestored = tabStore.restoreFromStorage();
+
 safe('layout', () => layout.init(document.getElementById('main')));
 safe('initSidebar', initSidebar);
 
 // §5.7 보존 모듈 초기화 ─────────────────────────────────────────────────────
 
-// openFileTab: finder / 여러 모듈에서 파일 여는 공통 핸들러
+// openFileTab: finder / outer tree / 기타 모듈에서 파일 여는 공통 핸들러.
+// FileViewerInstance 가 아직 PDF/text/풀 인터랙션 미구현이므로 (spec 1
+// §5.4.2 미완), spec §5.7 "legacy 풀세트 보존" 정신에 따라 활성 'files' 탭의
+// legacy iframe 에 hash deep-link 로 위임. iframe 이 마운트 안 됐으면 새로
+// 만들고 load 직후 hash 설정.
 const openFileTab = (path) => {
-  const leafId = layout.getActiveLeafId();
-  const tabId = tabStore.openTab({ kind: 'file', contentRef: path, leafId });
-  layout.activateTab(tabId);
+  // 1) 활성 leaf 의 'files' 탭 우선, 없으면 아무 'files' 탭, 그것도 없으면 새로 만듦
+  const activeLeafId = layout.getActiveLeafId();
+  let filesTab = tabStore.tabsForLeaf(activeLeafId).find(t => t.kind === 'files');
+  if (!filesTab) filesTab = tabStore.getAllTabs().find(t => t.kind === 'files');
+  if (!filesTab) {
+    filesCount = Math.max(1, filesCount + 1);
+    const id = tabStore.openTab({ kind: 'files', contentRef: `Files ${filesCount}`, leafId: activeLeafId });
+    filesTab = tabStore.getTab(id);
+  }
+  layout.activateTab(filesTab.id);
+
+  // 2) iframe 의 legacy app 이 노출한 __cnOpenFile 직접 호출. hash 기반은
+  // legacy 의 onNavigate→updateHash('') 와 충돌해서 hash 가 즉시 비워지는
+  // 회귀가 있었음.
+  const tryInvoke = () => {
+    const ifr = document.querySelector(
+      `[data-tab-content-id="${filesTab.id}"] iframe[data-files-frame]`
+    );
+    if (!ifr || !ifr.contentWindow || typeof ifr.contentWindow.__cnOpenFile !== 'function') {
+      return false;
+    }
+    try { ifr.contentWindow.__cnOpenFile(path); return true; } catch (_) { return false; }
+  };
+  if (tryInvoke()) return;
+  // iframe 아직 mount/load 전 — load 후 다시 시도
+  requestAnimationFrame(() => {
+    if (tryInvoke()) return;
+    const ifr = document.querySelector(
+      `[data-tab-content-id="${filesTab.id}"] iframe[data-files-frame]`
+    );
+    if (!ifr) return;
+    const onReady = () => {
+      // legacy app DOMContentLoaded 후 약간 기다려야 __cnOpenFile 노출됨
+      let tries = 0;
+      const tick = () => {
+        if (tryInvoke() || ++tries > 20) return;
+        setTimeout(tick, 100);
+      };
+      setTimeout(tick, 100);
+    };
+    ifr.addEventListener('load', onReady, { once: true });
+  });
 };
 
-safe('initFinder', () => initFinder({ openFile: openFileTab, onNavigate: loadFinderGrid }));
+safe('initFinder', () => initFinder({ openFile: openFileTab, onNavigate: () => {} }));
 safe('initFileOpsButtons', () => initFileOpsButtons({
   getCurrentDir,
   onChanged: () => loadFinderGrid(getCurrentDir()),
@@ -90,11 +139,7 @@ tabStore.onChange(syncPreviewBtns);
 
 safe('initTree', () => {
   initTree({
-    openFile: (path) => {
-      const leafId = layout.getActiveLeafId();
-      const tabId = tabStore.openTab({ kind: 'file', contentRef: path, leafId });
-      layout.activateTab(tabId);
-    },
+    openFile: openFileTab,  // legacy iframe 에 위임 (PDF/text/finder/history 풀세트)
     openDir: () => {},
   });
   loadTree();
@@ -155,20 +200,29 @@ if (hash) {
   layout.activateTab(tabId);
 }
 
-// Files 탭 카운터
+// Files 탭 카운터 — 복원된 'Files N' 탭의 max N 부터 이어 매김
 let filesCount = 0;
+for (const t of tabStore.getAllTabs()) {
+  const m = String(t.contentRef || '').match(/^Files (\d+)$/);
+  if (m) filesCount = Math.max(filesCount, parseInt(m[1]));
+}
 
-// 기본 — 첫 진입 시 Files 탭 자동 오픈
-if (!hash) {
+// 기본 — 첫 진입 + 복원할 탭이 없을 때만 Files 탭 자동 오픈
+if (!hash && tabsRestored === 0) {
   filesCount = 1;
   const leafId = layout.getActiveLeafId();
   const tabId = tabStore.openTab({ kind: 'files', contentRef: 'Files 1', leafId });
   layout.activateTab(tabId);
 }
 
-// focus query (옛 URL redirect 결과)
+// focus query (옛 URL redirect 결과) — 한 번만 처리 후 URL 정리, 안 그러면
+// 매 F5 마다 새 터미널이 무한 누적됨 (P0 버그). URL path 자체에 /terminal
+// 이 있으면 서버가 focus=terminal 주입하므로, 처리 직후 history.replaceState
+// 로 root path 로 바꿔야 다음 F5 에서 안 들어감.
 const focus = window.__FOCUS;
 if (focus === 'terminal' && !hash) {
+  // URL 먼저 정리 (실패하든 성공하든 다음 F5 에 영향 안 주게)
+  try { history.replaceState({}, '', BASE || '/claude-notebook'); } catch (_) {}
   // 현재 host_id 로 새 터미널 자동 생성
   fetch(`${JUPYTER_BASE}/api/terminals`, mutFetchOpts({
     method: 'POST',

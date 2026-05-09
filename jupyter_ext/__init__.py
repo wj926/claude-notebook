@@ -463,9 +463,17 @@ class LegacyFilesHandler(BaseHandler):
         xsrf = self.get_xsrf_string()
         html = STATIC_DIR.joinpath("legacy/index.html").read_text(encoding="utf-8")
         # Path replace — copied from original WorkspaceViewerHandler (lines 393–395)
-        html = html.replace('href="/style.css"',         f'href="{viewer_base}/static/style.css"')
-        html = html.replace('src="/keyboard-guard.js"',  f'src="{viewer_base}/static/keyboard-guard.js"')
-        html = html.replace('src="/app.js"',             f'src="{viewer_base}/static/app.js"')
+        html = html.replace('href="/style.css"',         f'href="{viewer_base}/static/legacy/style.css"')
+        html = html.replace('src="/keyboard-guard.js"',  f'src="{viewer_base}/static/legacy/keyboard-guard.js"')
+        html = html.replace('src="/app.js"',             f'src="{viewer_base}/static/legacy/app.js"')
+        # iframe 안에서는 외곽 페이지에 사이드바가 이미 있으므로 옛 사이드바와
+        # ☰ 토글을 숨겨서 본문 가로 폭 확보 (이중 사이드바 회귀 방지).
+        hide_chrome_css = (
+            "<style>"
+            ".sidebar, .sidebar-toggle, .sidebar-overlay { display: none !important; }"
+            "</style>"
+        )
+        html = html.replace("</head>", f"{hide_chrome_css}\n</head>", 1)
         html = self.inject_script(
             html,
             __VIEWER_BASE=viewer_base,

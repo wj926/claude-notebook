@@ -10,8 +10,30 @@ state.activeLeafId = state.leaves[0].id;
 
 let mountEl;
 const subs = [];
+const STORAGE_KEY = 'cn-v2-layout';
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      leaves: state.leaves,
+      activeLeafId: state.activeLeafId,
+      nextLeafId,
+    }));
+  } catch (_) {}
+}
+export function restoreFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const o = JSON.parse(raw);
+    if (!o || !Array.isArray(o.leaves) || o.leaves.length === 0) return false;
+    state.leaves = o.leaves;
+    state.activeLeafId = o.activeLeafId || o.leaves[0].id;
+    if (o.nextLeafId) nextLeafId = o.nextLeafId;
+    return true;
+  } catch (_) { return false; }
+}
 export function onChange(fn) { subs.push(fn); }
-function fire() { for (const fn of subs) fn(); render(); }
+function fire() { persist(); for (const fn of subs) fn(); render(); }
 
 function attachVDrag(sp) {
   sp.addEventListener('pointerdown', e => {
@@ -47,7 +69,10 @@ function attachVDrag(sp) {
       sp.removeEventListener('pointerup', cleanup);
       sp.removeEventListener('pointercancel', cleanup);
       sp.classList.remove('dragging');
-      // 최종 1회 fire — subs 에게만 알림 (render 호출 안 함)
+      // 최종 1회: persist (drag 중에는 inline style 만 갱신했으므로 leaf size
+      // 가 localStorage 에 저장 안 됨 — F5 시 폭 복원되도록 여기서 1회 저장)
+      // + subs 에게만 알림 (render 호출 안 함)
+      persist();
       for (const fn of subs) fn();
     };
     sp.addEventListener('pointermove', onMove);
@@ -256,6 +281,11 @@ function render() {
       emptyEl.style.display = 'none';
     }
 
+    // sec 를 먼저 mountEl 에 붙여둬야 mount-tab CustomEvent 가 document 까지
+    // bubble — innerHTML='' 로 detach 된 직후라 dispatch 시점에 parent 없으면
+    // app.js 의 document-level 핸들러가 안 잡힘 (iframe 안 만들어짐 버그).
+    mountEl.appendChild(sec);
+
     // 3) 모든 탭 컨테이너의 가시성 토글 — 활성만 보이게
     tabsHere.forEach(t => {
       let container = body.querySelector(`[data-tab-content-id="${t.id}"]`);
@@ -274,8 +304,6 @@ function render() {
         container.style.display = isActive ? '' : 'none';
       }
     });
-
-    mountEl.appendChild(sec);
 
     // 다음 leaf 와의 사이에 splitter 삽입
     if (i < state.leaves.length - 1) {
