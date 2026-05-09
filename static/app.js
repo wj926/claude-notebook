@@ -65,18 +65,27 @@ const openFileTab = (path) => {
     try { ifr.contentWindow.__cnOpenFile(path); return true; } catch (_) { return false; }
   };
   if (tryInvoke()) return;
-  // iframe 아직 mount/load 전 — load 후 다시 시도
+  // iframe 아직 mount/load 전 — load 후 다시 시도. 최대 ~3초 폴링 후 실패하면
+  // 콘솔 + alert 로 가시화 (silent failure 방지 — codex round 4 권장).
   requestAnimationFrame(() => {
     if (tryInvoke()) return;
     const ifr = document.querySelector(
       `[data-tab-content-id="${filesTab.id}"] iframe[data-files-frame]`
     );
-    if (!ifr) return;
+    if (!ifr) {
+      console.error('[openFileTab] iframe element not found for tab', filesTab.id);
+      return;
+    }
     const onReady = () => {
-      // legacy app DOMContentLoaded 후 약간 기다려야 __cnOpenFile 노출됨
       let tries = 0;
       const tick = () => {
-        if (tryInvoke() || ++tries > 20) return;
+        if (tryInvoke()) return;
+        if (++tries > 30) {
+          // 3초 폴링 실패 — legacy app __cnOpenFile 노출 안 됨
+          console.error('[openFileTab] __cnOpenFile not exposed after iframe load — path:', path);
+          alert(`파일 열기 실패: legacy 페이지 초기화 미완. 새로고침 후 다시 시도해주세요. (${path})`);
+          return;
+        }
         setTimeout(tick, 100);
       };
       setTimeout(tick, 100);
@@ -264,6 +273,23 @@ safe('initTermList', () => initTermList({
   listEl: document.getElementById('term-list'),
   addBtn: document.getElementById('new-term-btn'),
 }));
+
+// Spec §5.7.4 S7 — 모든 'files' iframe 의 unsaved 검사 후 confirm prompt.
+// legacy 자체 beforeunload 는 keepalive flush 만 하고 confirm 안 띄우므로
+// outer 에서 추가 가드. 사용자가 OK 하면 그대로 unload (legacy 가 flush).
+window.addEventListener('beforeunload', (e) => {
+  let anyDirty = false;
+  for (const ifr of document.querySelectorAll('iframe[data-files-frame]')) {
+    try {
+      if (ifr.contentWindow?.__cnIsDirty?.()) { anyDirty = true; break; }
+    } catch (_) {}
+  }
+  if (anyDirty) {
+    e.preventDefault();
+    e.returnValue = '저장되지 않은 변경 사항이 있습니다. 정말 떠나시겠습니까?';
+    return e.returnValue;
+  }
+});
 
 // resize → fit terminals
 window.addEventListener('resize', () => {

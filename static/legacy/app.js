@@ -527,4 +527,12 @@ const contentEl = document.getElementById('content');
             loadFinderGrid(dir);
             openPreview(path);
         };
+        // outer 페이지가 unsaved 가드 검사할 때 사용
+        window.__cnIsDirty = () => {
+            try {
+                if (!currentFileData) return false;
+                const content = getCurrentContent();
+                return content != null && content !== getSavedBaseline();
+            } catch (_) { return false; }
+        };
     } catch (_) {}

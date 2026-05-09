@@ -196,6 +196,14 @@ function render() {
         // closest() 로 X 글리프 외 부위 클릭도 잡음 (hit area)
         if (e.target.closest('.tab-close')) {
           e.stopPropagation();
+          // S2 — 'files' 탭이고 iframe 안 unsaved 있으면 confirm
+          const closingContainer = sec.querySelector(`[data-tab-content-id="${t.id}"]`);
+          const closingIfr = closingContainer?.querySelector('iframe[data-files-frame]');
+          let dirty = false;
+          try { dirty = !!closingIfr?.contentWindow?.__cnIsDirty?.(); } catch (_) {}
+          if (dirty && !confirm(`"${t.contentRef}" 에 저장되지 않은 변경이 있습니다. 정말 닫으시겠습니까?`)) {
+            return;
+          }
           tabStore.closeTab(t.id);
           // 이 leaf 가 비었으면 자동으로 leaf 도 닫기 (단, 마지막 leaf 는 유지)
           if (tabStore.tabsForLeaf(leaf.id).length === 0 && state.leaves.length > 1) {
