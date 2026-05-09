@@ -1111,6 +1111,14 @@ def load_jupyter_server_extension(nb_app):
         (ujoin(base_url, r"/claude-notebook/api/terminal-names"), TerminalNamesHandler),
         (ujoin(base_url, r"/claude-notebook/api/config"), ConfigHandler),
     ]
+    from .hosts import make_handlers as _make_host_handlers
+    _host_h = _make_host_handlers(BaseHandler)
+    handlers.extend([
+        (ujoin(base_url, r"/claude-notebook/api/hosts"),                 _host_h["HostsListHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/hosts/([^/]+)"),         _host_h["HostItemHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/hosts/([^/]+)/test"),    _host_h["HostTestHandler"]),
+        (ujoin(base_url, r"/claude-notebook/api/current_host"),          _host_h["CurrentHostHandler"]),
+    ])
     nb_app.web_app.add_handlers(".*$", handlers)
     nb_app.log.info("Claude Notebook extension loaded at %s/claude-notebook (workspace: %s)", base_url, workspace)
 
