@@ -1,14 +1,65 @@
 <!DOCTYPE html>
-<html lang="ko"><head><meta charset="utf-8">
-<title>Claude Notebook (v2 — placeholder)</title>
-</head><body>
-<h1>v2 통합 페이지 placeholder (Task 7 에서 본격 작성)</h1>
-<p>focus = <span id="focus"></span></p>
-<p>viewer_base = <span id="vb"></span></p>
-<p>jupyter_base = <span id="jb"></span></p>
-<script>
-document.getElementById("focus").textContent = window.__FOCUS || "(none)";
-document.getElementById("vb").textContent = window.__VIEWER_BASE || "(none)";
-document.getElementById("jb").textContent = window.__JUPYTER_BASE || "(none)";
-</script>
-</body></html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Claude Notebook</title>
+  <script>
+    (function(){var s=localStorage.getItem('cn-theme');var t=s==='dark'||s==='light'?s:(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.dataset.theme=t;})();
+  </script>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="main/main.css">
+  <script src="https://cdn.jsdelivr.net/npm/marked@4/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11/styles/github.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+</head>
+<body>
+  <header id="topbar">
+    <span class="brand">Claude Notebook</span>
+    <span id="ssh-slot"></span>
+    <span class="spacer"></span>
+    <button id="split-btn" type="button">&#x229F; Split</button>
+    <button id="sidebarToggle" type="button" aria-label="사이드바 토글">&#9776;</button>
+  </header>
+
+  <div id="sidebarOverlay" hidden></div>
+
+  <main id="app">
+    <aside id="sidebar">
+      <header class="sidebar-head">
+        <button id="sidebarClose" type="button" aria-label="닫기">&times;</button>
+        <button id="terminalBtn" type="button">Terminal</button>
+        <button id="themeToggleBtn" type="button">Theme</button>
+      </header>
+
+      <section class="side-section" id="files-section">
+        <header class="side-head">
+          <span class="side-title">Files</span>
+          <span class="side-badge" title="SSH host affects terminals only — files are always local">LOCAL</span>
+        </header>
+        <div id="tree" class="side-body"></div>
+      </section>
+
+      <section class="side-section" id="terms-section">
+        <header class="side-head">
+          <span class="side-title">Terminals</span>
+          <button class="side-add" id="new-term-btn" type="button">+</button>
+        </header>
+        <ul class="term-list" id="term-list"></ul>
+      </section>
+    </aside>
+
+    <div id="divider"></div>
+
+    <section id="main"><!-- layout.js fills --></section>
+  </main>
+
+  <div id="add-host-modal" class="modal" hidden></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
