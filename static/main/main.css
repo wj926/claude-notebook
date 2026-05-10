@@ -133,6 +133,11 @@
 }
 .tab-add:hover { background: var(--accent-light); color: var(--accent); border-color: var(--accent); }
 
+/* === Spec 2: 탭 DnD 시각 피드백 === */
+.tab.dragging { opacity: 0.4; }
+.tab.drop-before { box-shadow: inset 3px 0 0 0 var(--accent, #2563eb); }
+.tab.drop-after  { box-shadow: inset -3px 0 0 0 var(--accent, #2563eb); }
+
 .leaf-close {
   margin-left: auto;
   margin-right: 6px;

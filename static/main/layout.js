@@ -201,6 +201,7 @@ function render() {
       tEl.type = 'button';
       tEl.className = 'tab' + (t.id === leaf.activeTabId ? ' active' : '');
       tEl.dataset.tabId = t.id;  // app.js 가 contentRef 변경 시 직접 DOM 업데이트
+      tEl.draggable = true;       // Spec 2: 탭 DnD
       tEl.innerHTML = '<span class="tab-name"></span><span class="tab-close" title="닫기">×</span>';
       // 터미널 탭은 "Terminal N · host" 식으로 라벨 (사용자 요청 — 어떤
       // 서버 터미널인지 한 눈에). host=local 이면 호스트 부분 생략.
@@ -241,8 +242,65 @@ function render() {
           activateLeaf(leaf.id);
         }
       });
+      // Spec 2: 탭 DnD — 같은 leaf 안에서는 reorder, 다른 leaf 로 drop 하면 이동
+      tEl.addEventListener('dragstart', e => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-cn-tab', t.id);
+        tEl.classList.add('dragging');
+      });
+      tEl.addEventListener('dragend', () => tEl.classList.remove('dragging'));
       bar.appendChild(tEl);
     }
+    // tabbar 레벨 dragover/drop — 어느 위치에 떨어뜨릴지 계산
+    bar.addEventListener('dragover', e => {
+      if (!e.dataTransfer?.types?.includes('application/x-cn-tab')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      // 시각 피드백 — 가장 가까운 tab 의 좌/우 indicator
+      bar.querySelectorAll('.tab.drop-before, .tab.drop-after').forEach(el => {
+        el.classList.remove('drop-before', 'drop-after');
+      });
+      const tabs = [...bar.querySelectorAll('.tab')];
+      const target = tabs.find(el => {
+        const r = el.getBoundingClientRect();
+        return e.clientX < r.right;
+      });
+      if (target) {
+        const r = target.getBoundingClientRect();
+        target.classList.add(e.clientX < r.left + r.width / 2 ? 'drop-before' : 'drop-after');
+      } else if (tabs.length) {
+        tabs[tabs.length - 1].classList.add('drop-after');
+      }
+    });
+    bar.addEventListener('dragleave', e => {
+      if (!bar.contains(e.relatedTarget)) {
+        bar.querySelectorAll('.drop-before, .drop-after').forEach(el =>
+          el.classList.remove('drop-before', 'drop-after'));
+      }
+    });
+    bar.addEventListener('drop', e => {
+      const srcId = e.dataTransfer?.getData('application/x-cn-tab');
+      if (!srcId) return;
+      e.preventDefault();
+      bar.querySelectorAll('.drop-before, .drop-after').forEach(el =>
+        el.classList.remove('drop-before', 'drop-after'));
+      // 떨어뜨린 위치 계산
+      const tabs = [...bar.querySelectorAll('.tab')];
+      let insertIdx = tabs.length;
+      for (let i = 0; i < tabs.length; i++) {
+        const r = tabs[i].getBoundingClientRect();
+        if (e.clientX < r.left + r.width / 2) { insertIdx = i; break; }
+      }
+      // 같은 leaf 안에서 srcId 가 이미 insertIdx 위치면 noop
+      const srcInThisLeaf = tabs.find(el => el.dataset.tabId === srcId);
+      if (srcInThisLeaf) {
+        const srcIdx = tabs.indexOf(srcInThisLeaf);
+        if (srcIdx === insertIdx || srcIdx + 1 === insertIdx) return;
+        // splice 후 인덱스 보정
+        if (srcIdx < insertIdx) insertIdx--;
+      }
+      tabStore.moveTab(srcId, leaf.id, insertIdx);
+    });
     // 패널마다 + 버튼 — 클릭 시 이 leaf 에 새 터미널 탭 추가
     const addBtn = document.createElement('button');
     addBtn.type = 'button';

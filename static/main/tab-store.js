@@ -55,10 +55,36 @@ export function updateTab(id, patch) {
   // 발견). currentFile 같은 메타데이터 변경은 시각적 재렌더 불필요.
   persist();
 }
-export function moveTab(id, targetLeafId, _index) {
-  // Spec 2 (DnD) 가 호출. Spec 1 미사용.
-  const t = tabs.get(id); if (!t) return;
+export function moveTab(id, targetLeafId, targetIndex) {
+  const t = tabs.get(id);
+  if (!t) return;
+  // Map 은 insertion order — 새 위치로 옮기려면 entries reordering
+  const arr = [...tabs.values()];
+  const movedIdx = arr.findIndex(x => x.id === id);
+  if (movedIdx < 0) return;
+  arr.splice(movedIdx, 1);
   t.leafId = targetLeafId;
+  // targetIndex 는 같은 leaf 안의 위치 (다른 leaf 의 탭들은 카운트 안 함)
+  if (typeof targetIndex !== 'number' || targetIndex < 0) {
+    arr.push(t);  // 끝에
+  } else {
+    // 같은 leaf 의 N 번째 위치 = arr 에서 leaf 의 N 번째 entry 위치
+    let inserted = false;
+    let count = 0;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i].leafId === targetLeafId) {
+        if (count === targetIndex) {
+          arr.splice(i, 0, t);
+          inserted = true;
+          break;
+        }
+        count++;
+      }
+    }
+    if (!inserted) arr.push(t);
+  }
+  tabs.clear();
+  for (const x of arr) tabs.set(x.id, x);
   fire();
 }
 export function tabsForLeaf(leafId) {
