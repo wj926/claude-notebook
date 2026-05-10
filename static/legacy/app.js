@@ -134,6 +134,8 @@ const contentEl = document.getElementById('content');
         currentFileData = null;
         resetAutoSave();
         setSaveStatus('idle');
+        // 이전 파일의 zoom mode 초기화 (이후 파일별로 다시 설정)
+        try { window.__cnSetZoomMode?.(null); } catch (_) {}
         previewOverlay.classList.add('active');
         finder.style.display = 'none';
         previewHistory.style.display = 'none';
@@ -404,6 +406,7 @@ const contentEl = document.getElementById('content');
                 const blob = await imgRes.blob();
                 const objectUrl = URL.createObjectURL(blob);
                 previewBody.innerHTML = `<div class="image-viewer"><img src="${objectUrl}" alt="${escHtml(parts[parts.length - 1])}"></div>`;
+                window.__cnSetZoomMode?.('image');
                 return;
             }
 
@@ -489,8 +492,10 @@ const contentEl = document.getElementById('content');
             }
 
             renderPreviewMode(data);
+            window.__cnSetZoomMode?.('text');  // 글자 크기 조절 활성화
         } catch (err) {
             previewBody.innerHTML = `<p style="padding:20px;color:var(--text-secondary);">Error: ${escHtml(err.message)}</p>`;
+            window.__cnSetZoomMode?.(null);
         }
     }
 
@@ -540,6 +545,67 @@ const contentEl = document.getElementById('content');
 
     window.addEventListener('hashchange', syncHashToPath);
     window.addEventListener('popstate', syncHashToPath);
+
+    // === Zoom controls (md/text + image) ===
+    // 사용자 요청 — text 글자 크기 조절 + 이미지 확대.
+    const _zIn = document.getElementById('previewZoomIn');
+    const _zOut = document.getElementById('previewZoomOut');
+    const _zLabel = document.getElementById('previewZoomLabel');
+    const _ZOOM_KEY = (mode) => `cn-zoom-${mode}`;
+    const _ZOOM_STEPS = [0.5, 0.65, 0.8, 0.9, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5, 3];
+    let _zoomMode = null;  // 'text' | 'image' | null
+    const _loadZoom = (mode) => {
+        try { const v = parseFloat(localStorage.getItem(_ZOOM_KEY(mode)) || '1'); return isNaN(v) ? 1 : v; }
+        catch (_) { return 1; }
+    };
+    const _saveZoom = (mode, v) => { try { localStorage.setItem(_ZOOM_KEY(mode), String(v)); } catch (_) {} };
+    const _applyZoom = (v) => {
+        if (_zoomMode === 'text') {
+            previewBody.style.setProperty('--cn-text-zoom', String(v));
+        } else if (_zoomMode === 'image') {
+            const img = previewBody.querySelector('.image-viewer img');
+            if (img) {
+                img.style.transform = `scale(${v})`;
+                img.style.transformOrigin = 'top left';
+            }
+        }
+        if (_zLabel) _zLabel.textContent = Math.round(v * 100) + '%';
+        if (_zoomMode) _saveZoom(_zoomMode, v);
+    };
+    const _stepZoom = (delta) => {
+        if (!_zoomMode) return;
+        const cur = _loadZoom(_zoomMode);
+        let idx = _ZOOM_STEPS.findIndex(z => Math.abs(z - cur) < 0.001);
+        if (idx < 0) idx = _ZOOM_STEPS.indexOf(1);
+        const ni = Math.min(_ZOOM_STEPS.length - 1, Math.max(0, idx + delta));
+        _applyZoom(_ZOOM_STEPS[ni]);
+    };
+    window.__cnSetZoomMode = (mode) => {
+        _zoomMode = (mode === 'text' || mode === 'image') ? mode : null;
+        const visible = !!_zoomMode;
+        if (_zIn) _zIn.style.display = visible ? '' : 'none';
+        if (_zOut) _zOut.style.display = visible ? '' : 'none';
+        if (_zLabel) _zLabel.style.display = visible ? '' : 'none';
+        if (visible) _applyZoom(_loadZoom(_zoomMode));
+        else previewBody.style.removeProperty('--cn-text-zoom');
+    };
+    if (_zIn) _zIn.addEventListener('click', () => _stepZoom(1));
+    if (_zOut) _zOut.addEventListener('click', () => _stepZoom(-1));
+    // Ctrl/Cmd + wheel 로 zoom
+    previewBody.addEventListener('wheel', (e) => {
+        if (!_zoomMode) return;
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        _stepZoom(e.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+    // Ctrl+/-  reset 0
+    window.addEventListener('keydown', (e) => {
+        if (!_zoomMode) return;
+        if (!(e.ctrlKey || e.metaKey)) return;
+        if (e.key === '+' || e.key === '=') { e.preventDefault(); _stepZoom(1); }
+        else if (e.key === '-' || e.key === '_') { e.preventDefault(); _stepZoom(-1); }
+        else if (e.key === '0') { e.preventDefault(); _applyZoom(1); }
+    });
 
     // === Init ===
     initTree({ openFile: openPreview, openDir: loadFinderGrid });

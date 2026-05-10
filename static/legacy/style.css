@@ -761,6 +761,22 @@ button:focus-visible,
 .markdown-body {
     line-height: 1.7;
     word-wrap: break-word;
+    /* 사용자 zoom (--cn-text-zoom 은 .preview-body 에 set) */
+    font-size: calc(1em * var(--cn-text-zoom, 1));
+}
+/* code/text source view 도 같은 변수 적용 */
+.preview-body pre.source,
+.preview-body pre.source code {
+    font-size: calc(0.875em * var(--cn-text-zoom, 1));
+}
+/* 이미지 viewer — scale 으로 커지므로 overflow scroll 필요 */
+.preview-body .image-viewer {
+    overflow: auto;
+    width: 100%;
+    height: 100%;
+}
+.preview-body .image-viewer img {
+    transition: transform 0.1s ease;
 }
 
 .markdown-body h1 {

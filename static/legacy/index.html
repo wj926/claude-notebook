@@ -78,6 +78,10 @@
                 <div class="preview-header">
                     <div class="preview-breadcrumb" id="previewBreadcrumb"></div>
                     <div class="preview-actions">
+                        <!-- Zoom controls (md/text/image) — Cmd/Ctrl + scroll 또는 +/- 버튼 -->
+                        <button class="preview-btn" id="previewZoomOut" title="작게 (Ctrl+-)" style="display:none;">A−</button>
+                        <span class="preview-zoom-label" id="previewZoomLabel" style="display:none;font-size:11px;color:var(--text-secondary);min-width:36px;text-align:center">100%</span>
+                        <button class="preview-btn" id="previewZoomIn" title="크게 (Ctrl++)" style="display:none;">A+</button>
                         <button class="preview-btn preview-btn-text" id="previewViewToggle" title="Switch to plain text view" style="display:none;">Text</button>
                         <div class="preview-status" id="previewStatus" data-state="idle" title="Save status"></div>
                         <button class="preview-btn" id="previewHelp" title="Keyboard shortcuts (?)" style="display:none;">?</button>
