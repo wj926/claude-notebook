@@ -201,8 +201,16 @@ function render() {
       tEl.className = 'tab' + (t.id === leaf.activeTabId ? ' active' : '');
       tEl.dataset.tabId = t.id;  // app.js 가 contentRef 변경 시 직접 DOM 업데이트
       tEl.innerHTML = '<span class="tab-name"></span><span class="tab-close" title="닫기">×</span>';
-      tEl.querySelector('.tab-name').textContent = t.contentRef;
-      tEl.title = t.currentFile || t.contentRef;  // tooltip 에 full path
+      // 터미널 탭은 "Terminal N" 식으로 라벨 (그냥 N 만 나오면 너무 짧음).
+      // 사용자가 이름 바꾸면 displayName 우선.
+      let label;
+      if (t.kind === 'term') {
+        label = t.displayName || `Terminal ${t.contentRef}`;
+      } else {
+        label = t.displayName || t.contentRef;
+      }
+      tEl.querySelector('.tab-name').textContent = label;
+      tEl.title = t.currentFile || label;  // tooltip 에 full path
       tEl.addEventListener('click', e => {
         // closest() 로 X 글리프 외 부위 클릭도 잡음 (hit area)
         if (e.target.closest('.tab-close')) {
