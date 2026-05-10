@@ -300,10 +300,16 @@ function render() {
       emptyEl.style.display = 'none';
     }
 
-    // sec 를 mountEl 에 attach — 이미 올바른 위치면 건너뛰고 (iframe reload
-     // 회귀 회피), 아니면 appendChild 로 추가/이동.
-    if (sec.parentElement !== mountEl) {
-      mountEl.appendChild(sec);
+    // sec 를 mountEl 의 i 번째 leaf 위치에 — 이미 그 자리면 no-op (iframe
+     // reload 회피). 다른 위치거나 detached 면 insertBefore 로 이동.
+     // (codex 회귀 지적: 단순 parentElement 체크만 하면 [A, New, B] state
+     // 인데 DOM 이 [A, B, New] 로 어긋남.)
+    const currentLeafsInDom = mountEl.querySelectorAll('.leaf');
+    const expected = currentLeafsInDom[i];  // i 번째 leaf 가 있어야 할 자리
+    if (sec !== expected) {
+      // expected 위치에 sec 가 없음 → expected 앞에 sec 삽입 (또는 끝에 추가)
+      if (expected) mountEl.insertBefore(sec, expected);
+      else mountEl.appendChild(sec);
     }
 
     // 3) 모든 탭 컨테이너의 가시성 토글 — 활성만 보이게

@@ -110,7 +110,11 @@ def _take_snapshot(full_path: Path) -> None:
 def is_safe_path(workspace: Path, requested_path: str) -> bool:
     try:
         resolved = (workspace / requested_path).resolve()
-        return str(resolved).startswith(str(workspace))
+        ws_str = str(workspace)
+        # 워크스페이스 자체 + 그 하위 경로만 허용. prefix 매칭만 하면
+        # /home/dami/wj 가 워크스페이스일 때 /home/dami/wj2/... 가
+        # startswith 통과하는 escape 회귀 (codex round 5 지적).
+        return resolved == workspace or str(resolved).startswith(ws_str + os.sep)
     except (ValueError, OSError):
         return False
 
