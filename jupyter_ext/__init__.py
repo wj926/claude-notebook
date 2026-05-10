@@ -1150,6 +1150,62 @@ def _jupyter_server_extension_paths():
     return [{"module": "jupyter_ext"}]
 
 
+def _cleanup_uploads(workspace, max_age_seconds, log):
+    """uploads/ 안에서 mtime 이 max_age 지난 파일 삭제. 디렉토리 없으면 no-op."""
+    upload_dir = workspace / TERMINAL_UPLOAD_DIR
+    if not upload_dir.is_dir():
+        return
+    cutoff = time.time() - max_age_seconds
+    removed = 0
+    freed = 0
+    for entry in upload_dir.iterdir():
+        try:
+            # 심볼릭 링크 자체는 보존 (codex 권장 — 사용자가 의도적으로
+            # 만든 link 일 수 있음. lstat 으로 link 자신의 mtime 만 보고
+            # 타깃은 안 따라감)
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            st = entry.stat()
+            if st.st_mtime < cutoff:
+                size = st.st_size
+                entry.unlink()
+                removed += 1
+                freed += size
+        except OSError as e:
+            log.warning("uploads cleanup: skip %s (%s)", entry, e)
+    if removed:
+        log.info("uploads cleanup: removed %d files (%.1f KB)", removed, freed / 1024)
+
+
+def _schedule_uploads_cleanup(nb_app):
+    """부팅 시 1회 + 1시간마다 uploads/ 7일 TTL 정리.
+
+    Extension 재로딩 시 중복 스케줄러 누적 방지 — nb_app 에 핸들 저장 후
+    재진입 시 기존 PeriodicCallback 정지 (codex 권장).
+    """
+    from tornado.ioloop import IOLoop, PeriodicCallback
+    workspace = Path(nb_app.web_app.settings["claude_notebook_path"])
+    max_age = 7 * 24 * 3600  # 7일
+    interval_ms = 60 * 60 * 1000  # 1시간
+
+    # 중복 가드 — 이미 등록돼있으면 정지
+    prev = getattr(nb_app, "_cn_uploads_pcb", None)
+    if prev is not None:
+        try: prev.stop()
+        except Exception: pass
+
+    def _run():
+        try:
+            _cleanup_uploads(workspace, max_age, nb_app.log)
+        except Exception as e:
+            nb_app.log.warning("uploads cleanup failed: %s", e)
+
+    IOLoop.current().add_callback(_run)
+    pcb = PeriodicCallback(_run, interval_ms)
+    pcb.start()
+    nb_app._cn_uploads_pcb = pcb
+
+
 def _auto_create_terminals(nb_app):
     """Create terminals from saved config on server startup."""
     from tornado.ioloop import IOLoop
@@ -1304,3 +1360,6 @@ def load_jupyter_server_extension(nb_app):
 
     # Auto-create saved terminals
     _auto_create_terminals(nb_app)
+
+    # uploads/ 7일 TTL 자동 정리
+    _schedule_uploads_cleanup(nb_app)
