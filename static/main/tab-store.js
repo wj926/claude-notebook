@@ -2,13 +2,15 @@ let nextTabId = 1;
 const tabs = new Map();
 const subs = [];
 
-// Spec 3: host 별 별도 localStorage 키 — 각 chrome 탭이 다른 host 를
-// 가리킬 때 탭 list 가 섞이지 않도록.
-const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || '';
-const STORAGE_KEY = _h ? `cn-v2-tabs-${_h}` : 'cn-v2-tabs';
+// 각 chrome 탭마다 격리된 storage — 같은 host 의 여러 chrome 탭이
+// localStorage 같은 키를 덮어쓰는 회귀 차단 (codex P1). sessionStorage 는
+// 각 탭이 자체 namespace 이고 F5 후에도 유지됨 (탭 닫으면 사라짐).
+const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || 'local';
+const STORAGE_KEY = `cn-v2-tabs-${_h}`;
+const _store = (typeof sessionStorage !== 'undefined') ? sessionStorage : localStorage;
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    _store.setItem(STORAGE_KEY, JSON.stringify({
       tabs: [...tabs.values()],
       nextTabId,
     }));
@@ -16,7 +18,7 @@ function persist() {
 }
 export function restoreFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = _store.getItem(STORAGE_KEY);
     if (!raw) return 0;
     const o = JSON.parse(raw);
     if (!o || !Array.isArray(o.tabs)) return 0;

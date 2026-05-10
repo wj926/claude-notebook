@@ -141,17 +141,12 @@ safe('initHistoryModal', () => initHistoryModal({
   },
 }));
 
-// 파일 탭 활성화 시 previewHistory / previewHelp 버튼 표시
+// outer previewHistory/previewHelp 버튼은 legacy iframe 안에 동일한 게
+// 이미 있어서 중복. 항상 hide (codex P2 — getFile dead path).
 const previewHistory = document.getElementById('previewHistory');
 const previewHelp    = document.getElementById('previewHelp');
 function syncPreviewBtns() {
-  const activeLeafId = layout.getActiveLeafId();
-  const leaf = layout.getLeavesInVisualOrder().find(l => l.id === activeLeafId);
-  const isFiletab = leaf && leaf.activeTabId && (() => {
-    const t = tabStore.getTab(leaf.activeTabId);
-    // 우리는 B 방향으로 'files' kind (legacy iframe) 만 사용 — 'file' 은 dead path.
-    return t && t.kind === 'files';
-  })();
+  const isFiletab = false;
   if (previewHistory) previewHistory.style.display = isFiletab ? '' : 'none';
   if (previewHelp)    previewHelp.style.display    = isFiletab ? '' : 'none';
 }

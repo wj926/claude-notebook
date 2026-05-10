@@ -49,22 +49,23 @@ def list_dir(host_id, sub_path=""):
     Raises: ValueError (unsafe path), RuntimeError (ssh failure).
     """
     sub = _safe_subpath(sub_path)
-    # 원격 target — sub 가 빈 문자열이면 $HOME, 아니면 $HOME/sub
-    if sub:
-        # shell quoting — 사용자가 가지고 있을 법한 공백/특수문자 안전 처리
-        target = '"$HOME/' + sub.replace('"', '\\"') + '"'
-    else:
-        target = '"$HOME"'
-
-    # find 의 -printf 로 atomic parsing — 줄당 type\tsize\tmtime\tname
-    # %y = type char, %s = size, %T@ = mtime epoch, %f = name only (no path)
-    remote_cmd = (
-        f"find {target} -mindepth 1 -maxdepth 1 "
-        f'-printf "%y\\t%s\\t%T@\\t%f\\n" 2>/dev/null | sort'
+    # P0 fix (codex audit): shell quoting 만으로는 $(), backtick, \ 등 안전
+    # 못 함. ssh 가 모든 args 를 remote shell 로 넘기므로, stdin script 로
+    # 보내고 sub_path 는 positional arg 로 전달해 "$1" 로 quoted reference.
+    # 그러면 sub_path 가 어떤 문자열이어도 remote shell expansion 차단됨.
+    remote_script = (
+        'cd "$HOME" 2>/dev/null || exit 1\n'
+        'sub="$1"\n'
+        'if [ -n "$sub" ]; then cd "$sub" 2>/dev/null || exit 1; fi\n'
+        'find . -mindepth 1 -maxdepth 1 '
+        '-printf "%y\\t%s\\t%T@\\t%P\\n" 2>/dev/null | sort\n'
     )
-    cmd = _ssh_base(host_id) + [remote_cmd]
+    cmd = _ssh_base(host_id) + ["sh", "-s", "--", sub]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(
+            cmd, input=remote_script,
+            capture_output=True, text=True, timeout=30,
+        )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"ssh timeout after 30s")
     if proc.returncode != 0:

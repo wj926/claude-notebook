@@ -10,11 +10,13 @@ state.activeLeafId = state.leaves[0].id;
 
 let mountEl;
 const subs = [];
-const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || '';
-const STORAGE_KEY = _h ? `cn-v2-layout-${_h}` : 'cn-v2-layout';
+// 각 chrome 탭마다 sessionStorage — 다중 탭 충돌 회피 (codex P1)
+const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || 'local';
+const STORAGE_KEY = `cn-v2-layout-${_h}`;
+const _store = (typeof sessionStorage !== 'undefined') ? sessionStorage : localStorage;
 function persist() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    _store.setItem(STORAGE_KEY, JSON.stringify({
       leaves: state.leaves,
       activeLeafId: state.activeLeafId,
       nextLeafId,
@@ -23,7 +25,7 @@ function persist() {
 }
 export function restoreFromStorage() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = _store.getItem(STORAGE_KEY);
     if (!raw) return false;
     const o = JSON.parse(raw);
     if (!o || !Array.isArray(o.leaves) || o.leaves.length === 0) return false;
@@ -284,20 +286,32 @@ function render() {
       e.preventDefault();
       bar.querySelectorAll('.drop-before, .drop-after').forEach(el =>
         el.classList.remove('drop-before', 'drop-after'));
-      // 떨어뜨린 위치 계산
       const tabs = [...bar.querySelectorAll('.tab')];
       let insertIdx = tabs.length;
       for (let i = 0; i < tabs.length; i++) {
         const r = tabs[i].getBoundingClientRect();
         if (e.clientX < r.left + r.width / 2) { insertIdx = i; break; }
       }
-      // 같은 leaf 안에서 srcId 가 이미 insertIdx 위치면 noop
       const srcInThisLeaf = tabs.find(el => el.dataset.tabId === srcId);
       if (srcInThisLeaf) {
         const srcIdx = tabs.indexOf(srcInThisLeaf);
         if (srcIdx === insertIdx || srcIdx + 1 === insertIdx) return;
-        // splice 후 인덱스 보정
         if (srcIdx < insertIdx) insertIdx--;
+      } else {
+        // cross-leaf 이동 — iframe detach+reattach 로 reload 됨. files 탭이
+        // dirty 면 사용자 확인 (P1 codex audit).
+        const srcTab = tabStore.getTab(srcId);
+        if (srcTab?.kind === 'files') {
+          const srcIfr = document.querySelector(
+            `[data-tab-content-id="${srcId}"] iframe[data-files-frame]`
+          );
+          let dirty = false;
+          try { dirty = !!srcIfr?.contentWindow?.__cnIsDirty?.(); } catch (_) {}
+          if (dirty && !confirm(
+            `"${srcTab.contentRef}" 에 저장되지 않은 변경이 있습니다. ` +
+            '다른 패널로 옮기면 iframe 이 재로딩됩니다. 계속하시겠어요?'
+          )) return;
+        }
       }
       tabStore.moveTab(srcId, leaf.id, insertIdx);
     });
