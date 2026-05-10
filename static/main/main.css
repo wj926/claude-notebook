@@ -25,6 +25,7 @@
 /* App layout */
 #app {
   height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
   display: flex;
 }
 #sidebar {
@@ -246,11 +247,32 @@
 }
 .splitter:hover, .splitter.dragging { background: var(--accent); }
 
-@media (max-width: 720px) {
+@media (max-width: 768px) {
   #split-btn { display: none; }
   .splitter { display: none; }
-  #sidebar { width: 100%; }
-  #app { flex-direction: column; }
+  #app { flex-direction: row; }
+  #main { width: 100%; min-width: 0; flex: 1 1 auto; }
+  #divider { display: none; }
+  #sidebar {
+    position: fixed;
+    top: 48px; bottom: 0; left: 0;
+    width: min(85vw, 320px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 100;
+    border-right: 1px solid var(--border);
+  }
+  #sidebar.open {
+    transform: translateX(0);
+    box-shadow: 4px 0 16px rgba(0,0,0,0.15);
+  }
+  #sidebarOverlay {
+    position: fixed; inset: 48px 0 0 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 90;
+  }
+  #sidebarOverlay[hidden] { display: none; }
+  #sidebarToggle { min-width: 44px; min-height: 44px; font-size: 22px; }
 }
 
 /* ── Terminals sidebar list ── */

@@ -17,15 +17,17 @@ export function openSidebar() {
     sidebar.classList.add('open');
     sidebar.classList.remove('collapsed');
     sidebarOverlay.classList.add('active');
-    divider.style.display = '';
+    sidebarOverlay.hidden = false;
+    if (divider) divider.style.display = '';
 }
 
 export function closeSidebar() {
     sidebar.classList.remove('open');
     sidebarOverlay.classList.remove('active');
+    sidebarOverlay.hidden = true;
     if (!isMobile()) {
         sidebar.classList.add('collapsed');
-        divider.style.display = 'none';
+        if (divider) divider.style.display = 'none';
     }
 }
 
