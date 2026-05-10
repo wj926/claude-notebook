@@ -201,6 +201,33 @@ export class TerminalInstance {
 
     formEl?.addEventListener('submit', submit, sig);
     sendBtn?.addEventListener('click', submit, sig);
+
+    // 클립보드 paste — 캡처 도구로 찍은 이미지 등을 Ctrl+V 로 바로 첨부
+    // (ChatGPT 식). textarea 의 paste 이벤트에서 clipboardData.items 검사.
+    inputField.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items || !pendingFilesRef) return;
+      const files = [];
+      for (const it of items) {
+        if (it.kind === 'file') {
+          const f = it.getAsFile();
+          if (f) {
+            // 캡처 도구 이미지는 보통 'image.png' 같은 generic 이름
+            // → 타임스탬프 prefix 추가해서 식별 쉽게
+            const ext = (f.name.split('.').pop() || 'png').toLowerCase();
+            const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const renamed = new File([f], `paste-${ts}.${ext}`, { type: f.type });
+            files.push(renamed);
+          }
+        }
+      }
+      if (files.length) {
+        e.preventDefault();  // 텍스트로 paste 안 되게 차단
+        pendingFilesRef.list.push(...files);
+        pendingFilesRef.render();
+      }
+    }, sig);
+
     inputField.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !isMobile && !e.shiftKey) {
         e.preventDefault();
