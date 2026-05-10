@@ -24,6 +24,7 @@ import {
     resetAutoSave,
     getSavedBaseline,
     setSavedBaseline,
+    setLastVersion,
 } from './editor/auto-save.js';
 import { initKeyboardHelp } from './editor/keyboard-help.js';
 import { rehydrateMathBlocks } from './editor/math.js';
@@ -463,6 +464,7 @@ const contentEl = document.getElementById('content');
             const data = await res.json();
             currentFileData = data;
             setSavedBaseline(data.content);
+            setLastVersion(data.version || null);
 
             // File too large for inline preview — offer download
             if (data.too_large) {

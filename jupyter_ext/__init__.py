@@ -597,7 +597,7 @@ class WorkspaceFileHandler(BaseHandler):
                 return
             # 텍스트 JSON
             try:
-                content, size = ssh_fs.read_text(host, file_path)
+                content, info = ssh_fs.read_text(host, file_path)
             except FileNotFoundError:
                 raise web.HTTPError(404, "Not found: %s" % file_path)
             except ValueError as e:
@@ -607,12 +607,16 @@ class WorkspaceFileHandler(BaseHandler):
             if content is None:
                 self.json_response({
                     "path": file_path, "name": name, "content": None,
-                    "extension": ext, "too_large": True, "size": size,
+                    "extension": ext, "too_large": True,
+                    "size": info["size"], "mtime": info["mtime"],
+                    "version": info["version"],
                 })
                 return
             self.json_response({
                 "path": file_path, "name": name,
                 "content": content, "extension": ext,
+                "size": info["size"], "mtime": info["mtime"],
+                "version": info["version"],
             })
             return
 
@@ -652,6 +656,8 @@ class WorkspaceFileHandler(BaseHandler):
             return
 
         # Text file: check size limit
+        st = full_path.stat()
+        version = f"{st.st_mtime_ns}:{st.st_size}"
         if file_size > _MAX_TEXT_PREVIEW:
             self.json_response({
                 "path": file_path,
@@ -660,13 +666,14 @@ class WorkspaceFileHandler(BaseHandler):
                 "extension": ext,
                 "too_large": True,
                 "size": file_size,
+                "mtime": st.st_mtime,
+                "version": version,
             })
             return
 
         try:
             content = full_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
-            # Binary file — stream it
             self.set_header("Content-Type", "application/octet-stream")
             self.set_header("Content-Length", str(file_size))
             await self._stream_file(full_path)
@@ -679,6 +686,9 @@ class WorkspaceFileHandler(BaseHandler):
             "name": full_path.name,
             "content": content,
             "extension": ext,
+            "size": st.st_size,
+            "mtime": st.st_mtime,
+            "version": version,
         })
 
     async def _stream_file(self, full_path):
@@ -890,36 +900,64 @@ class WorkspaceDeleteHandler(BaseHandler):
 
 
 class WorkspaceSaveHandler(BaseHandler):
-    """Save (overwrite) a text file in the workspace. Spec 3-c: host-aware."""
+    """Save text file. Lost-update 보호 (codex round 7): body 의 version 이
+    있고 force != true 면 disk 와 비교해 mismatch → 409. 응답에 새 version.
+    """
     @web.authenticated
     def put(self):
         host = self.get_argument("host", "local")
         body = json.loads(self.request.body)
         file_path = body.get("path")
         content = body.get("content")
+        expected_version = body.get("version")  # 'mtime_ns:size' or None
+        force = bool(body.get("force"))
         if content is None:
             raise web.HTTPError(400, "content required")
         if host != "local":
             from . import ssh_fs
             try:
-                ssh_fs.write_text(host, file_path, content)
+                new_version = ssh_fs.write_text(
+                    host, file_path, content,
+                    expected_version=None if force else expected_version,
+                )
             except FileNotFoundError:
                 raise web.HTTPError(404, "Not found: %s" % file_path)
             except ValueError as e:
                 raise web.HTTPError(400, str(e))
+            except ssh_fs.VersionMismatch as e:
+                self.set_status(409)
+                self.json_response({
+                    "error": "version_mismatch",
+                    "expected": e.expected, "actual": e.actual,
+                })
+                return
             except RuntimeError as e:
                 raise web.HTTPError(502, "remote save failed: %s" % e)
-            self.json_response({"saved": file_path, "host": host})
+            self.json_response({"saved": file_path, "host": host, "version": new_version})
             return
         full_path = self.validate_path(file_path)
         if not full_path.is_file():
             raise web.HTTPError(404, "Not found: %s" % file_path)
+        # local: precondition check
+        if expected_version and not force:
+            cur = full_path.stat()
+            cur_version = f"{cur.st_mtime_ns}:{cur.st_size}"
+            if cur_version != expected_version:
+                self.set_status(409)
+                self.json_response({
+                    "error": "version_mismatch",
+                    "expected": expected_version, "actual": cur_version,
+                })
+                return
         _take_snapshot(full_path)
         try:
             full_path.write_text(content, encoding="utf-8")
         except OSError as e:
             raise web.HTTPError(500, "Write error: %s" % str(e))
-        self.json_response({"saved": file_path})
+        # 새 version 응답
+        new_st = full_path.stat()
+        new_version = f"{new_st.st_mtime_ns}:{new_st.st_size}"
+        self.json_response({"saved": file_path, "version": new_version})
 
 
 class WorkspaceSnapshotsListHandler(BaseHandler):

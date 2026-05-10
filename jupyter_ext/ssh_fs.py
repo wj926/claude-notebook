@@ -130,9 +130,10 @@ _MAX_TEXT_PREVIEW = 2 * 1024 * 1024  # 2 MB — local 과 동일한 한도
 
 
 def stat_file(host_id, sub_path):
-    """원격 파일 stat — size + mtime + extension. 없으면 None.
+    """원격 파일 stat — size + mtime + mtime_ns. 없으면 None.
 
-    list_dir 처럼 sh -s + "$1" 로 path injection 차단.
+    Returns dict {size, mtime, mtime_ns, version}. version = 'mtime_ns:size'
+    (codex 권장 — float 정밀도 + FS 해상도 회피).
     """
     _validate_host(host_id)
     sub = _safe_subpath(sub_path)
@@ -142,8 +143,8 @@ def stat_file(host_id, sub_path):
         'cd "$HOME" 2>/dev/null || exit 1\n'
         'sub="$1"\n'
         'if [ ! -f "$sub" ]; then exit 2; fi\n'
-        # %s = size, %T@ = mtime, 그 다음 file 자체 (file -b 의 mime)
-        'stat -c "%s %Y" "$sub"\n'
+        # %s = size, %Y = mtime sec, %.Y = mtime with ns fractional
+        'stat -c "%s %Y %.Y" "$sub"\n'
     )
     cmd = _ssh_base(host_id) + ["sh", "-s", "--", sub]
     try:
@@ -160,17 +161,31 @@ def stat_file(host_id, sub_path):
     parts = proc.stdout.strip().split()
     if len(parts) < 2:
         raise RuntimeError(f"unexpected stat output: {proc.stdout!r}")
-    return {"size": int(parts[0]), "mtime": float(parts[1])}
+    size = int(parts[0])
+    mtime = float(parts[1])
+    # mtime_ns from %.Y if available (GNU stat), else fallback to int(mtime*1e9)
+    if len(parts) >= 3 and '.' in parts[2]:
+        sec_str, ns_str = parts[2].split('.', 1)
+        ns_str = (ns_str + "000000000")[:9]
+        mtime_ns = int(sec_str) * 1_000_000_000 + int(ns_str)
+    else:
+        mtime_ns = int(mtime * 1_000_000_000)
+    return {
+        "size": size, "mtime": mtime, "mtime_ns": mtime_ns,
+        "version": f"{mtime_ns}:{size}",
+    }
 
 
 def read_text(host_id, sub_path, max_size=_MAX_TEXT_PREVIEW):
-    """원격 텍스트 파일 read. 큰 파일은 (None, size) 로 too_large 표시."""
+    """원격 텍스트 파일 read. (content, info) 반환.
+    info = {size, mtime, mtime_ns, version}. 큰 파일/binary 면 content=None.
+    """
     _validate_host(host_id)
     info = stat_file(host_id, sub_path)
     if info is None:
         raise FileNotFoundError(sub_path)
     if info["size"] > max_size:
-        return None, info["size"]
+        return None, info
     sub = _safe_subpath(sub_path)
     remote_script = (
         'cd "$HOME" 2>/dev/null || exit 1\n'
@@ -179,15 +194,14 @@ def read_text(host_id, sub_path, max_size=_MAX_TEXT_PREVIEW):
     cmd = _ssh_base(host_id) + ["sh", "-s", "--", sub]
     proc = subprocess.run(
         cmd, input=remote_script.encode("utf-8"),
-        capture_output=True, timeout=30,  # bytes 모드 (utf-8 decode 직접)
+        capture_output=True, timeout=30,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"ssh cat failed: {proc.stderr.decode('utf-8', 'replace')[:200]}")
     try:
-        return proc.stdout.decode("utf-8"), info["size"]
+        return proc.stdout.decode("utf-8"), info
     except UnicodeDecodeError:
-        # binary file
-        return None, info["size"]
+        return None, info
 
 
 # Spec 3-b 보완: 원격 binary read (PDF/이미지/HTML 등 raw stream)
@@ -223,27 +237,56 @@ def read_binary(host_id, sub_path, max_size=_MAX_BINARY_RAW):
 
 
 # Spec 3-c: 원격 파일 save / upload
-def write_text(host_id, sub_path, content):
-    """원격 텍스트 파일 atomic 저장 — content 는 stdin 으로 (argv 한도 회피).
+class VersionMismatch(Exception):
+    """파일이 다른 곳에서 수정됨 (lost-update 보호). HTTP 409 로 매핑."""
+    def __init__(self, expected, actual):
+        super().__init__(f"version mismatch: expected={expected!r} actual={actual!r}")
+        self.expected = expected
+        self.actual = actual
 
-    sub_path 는 _safe_subpath 로 검증, content 는 ssh stdin 으로 직접 넘김
-    → 어떤 binary/text 도 안전. 임시 파일 → mv 로 atomic.
+
+def write_text(host_id, sub_path, content, expected_version=None):
+    """원격 텍스트 파일 atomic 저장 — content 는 stdin (argv 한도 회피).
+
+    expected_version 주어지면 stat+검사+write 를 flock 임계구역에서 한 번에
+    실행 (codex TOCTOU 권장). 불일치 시 special exit code → VersionMismatch.
+
+    Returns: 새 version string ('mtime_ns:size').
     """
     _validate_host(host_id)
     sub = _safe_subpath(sub_path)
     if not sub:
         raise ValueError("path required")
-    # ssh "sh -c 'script' _ arg1 arg2..." — name=_, $1=sub. content 는 stdin.
+    # flock + stat 검사 + atomic mv. expected_version 가 None 이면 검사 skip.
+    # remote 에서 special exit code: 9 = version mismatch
+    expected = expected_version or ""
     remote_cmd = (
         'set -e; cd "$HOME"; '
-        'sub="$1"; '
-        'tmp="${sub}.cn-tmp.$$"; '
-        'cat > "$tmp"; '
-        'mv -f "$tmp" "$sub"'
+        'sub="$1"; expected="$2"; '
+        # flock — 같은 파일 임계구역. -x exclusive, -w 30 wait 30s.
+        '(flock -x -w 30 9 || { echo "flock timeout" >&2; exit 4; }; '
+        '  if [ -n "$expected" ] && [ -f "$sub" ]; then '
+        '    cur_size=$(stat -c "%s" "$sub"); '
+        '    cur_ns=$(stat -c "%.Y" "$sub" 2>/dev/null | tr -d "."); '
+        '    cur_ns=${cur_ns:-$(($(stat -c "%Y" "$sub")*1000000000))}; '
+        '    cur_ver="${cur_ns}:${cur_size}"; '
+        '    if [ "$cur_ver" != "$expected" ]; then '
+        '      printf "MISMATCH:%s\\n" "$cur_ver" >&2; exit 9; '
+        '    fi; '
+        '  fi; '
+        '  tmp="${sub}.cn-tmp.$$"; '
+        '  cat > "$tmp"; '
+        '  mv -f "$tmp" "$sub"; '
+        '  new_size=$(stat -c "%s" "$sub"); '
+        '  new_ns=$(stat -c "%.Y" "$sub" 2>/dev/null | tr -d "."); '
+        '  new_ns=${new_ns:-$(($(stat -c "%Y" "$sub")*1000000000))}; '
+        '  printf "%s:%s" "$new_ns" "$new_size"; '
+        ') 9>"${sub}.cn-lock"'
     )
-    # ssh 는 host 뒤 args 를 space-join 해서 remote shell 에 던짐 → 우리 args
-    # 의 quoting 손실. shlex.quote 로 한 줄로 묶어서 ssh 가 수정 못 하게.
-    remote_full = "sh -c " + shlex.quote(remote_cmd) + " _ " + shlex.quote(sub)
+    remote_full = (
+        "sh -c " + shlex.quote(remote_cmd)
+        + " _ " + shlex.quote(sub) + " " + shlex.quote(expected)
+    )
     cmd = _ssh_base(host_id) + [remote_full]
     try:
         proc = subprocess.run(
@@ -252,11 +295,21 @@ def write_text(host_id, sub_path, content):
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError("ssh save timeout")
+    if proc.returncode == 9:
+        # version mismatch — stderr 의 MISMATCH:<actual> 파싱
+        stderr = proc.stderr.decode("utf-8", "replace")
+        actual = ""
+        for line in stderr.splitlines():
+            if line.startswith("MISMATCH:"):
+                actual = line[len("MISMATCH:"):].strip()
+                break
+        raise VersionMismatch(expected, actual)
     if proc.returncode != 0:
         raise RuntimeError(
             f"ssh save exit {proc.returncode}: "
             f"{proc.stderr.decode('utf-8', 'replace')[:200]}"
         )
+    return proc.stdout.decode("utf-8", "replace").strip()
 
 
 def upload_file(host_id, sub_dir, name, content_bytes):
