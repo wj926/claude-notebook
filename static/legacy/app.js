@@ -441,7 +441,9 @@ const contentEl = document.getElementById('content');
             // XSS 위험 낮음). allow-same-origin 은 미부여 — workspace API 접근
             // 차단 유지.
             if (ext === '.html' || ext === '.htm') {
-                const rawUrl = `${BASE}/raw/${path.split('/').map(encodeURIComponent).join('/')}`;
+                const _hh = window.__HOST || window.__currentHostId;
+                const _hpq = (_hh && _hh !== 'local') ? `?host=${encodeURIComponent(_hh)}` : '';
+                const rawUrl = `${BASE}/raw/${path.split('/').map(encodeURIComponent).join('/')}${_hpq}`;
                 const fname = parts[parts.length - 1];
                 previewBody.innerHTML =
                     `<iframe class="html-frame" src="${rawUrl}" sandbox="allow-scripts"

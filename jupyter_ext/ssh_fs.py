@@ -175,6 +175,37 @@ def read_text(host_id, sub_path, max_size=_MAX_TEXT_PREVIEW):
         return None, info["size"]
 
 
+# Spec 3-b 보완: 원격 binary read (PDF/이미지/HTML 등 raw stream)
+_MAX_BINARY_RAW = 50 * 1024 * 1024  # 50 MB — 기본 상한
+
+
+def read_binary(host_id, sub_path, max_size=_MAX_BINARY_RAW):
+    """원격 파일을 binary 로 read. PDF/이미지/HTML 등 raw stream 용도.
+
+    Returns: (bytes, stat_info).
+    Raises: FileNotFoundError, RuntimeError(too large or ssh fail).
+    """
+    info = stat_file(host_id, sub_path)
+    if info is None:
+        raise FileNotFoundError(sub_path)
+    if info["size"] > max_size:
+        raise RuntimeError(f"file too large ({info['size']} bytes > {max_size})")
+    sub = _safe_subpath(sub_path)
+    remote_cmd = 'cd "$HOME" 2>/dev/null || exit 1; cat "$1"'
+    remote_full = "sh -c " + shlex.quote(remote_cmd) + " _ " + shlex.quote(sub)
+    cmd = _ssh_base(host_id) + [remote_full]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("ssh cat timeout")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ssh cat exit {proc.returncode}: "
+            f"{proc.stderr.decode('utf-8', 'replace')[:200]}"
+        )
+    return proc.stdout, info
+
+
 # Spec 3-c: 원격 파일 save / upload
 def write_text(host_id, sub_path, content):
     """원격 텍스트 파일 atomic 저장 — content 는 stdin 으로 (argv 한도 회피).

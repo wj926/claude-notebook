@@ -558,13 +558,44 @@ class WorkspaceFileHandler(BaseHandler):
         host = self.get_argument("host", "local")
         file_path = self.get_argument("path", None)
         raw_mode = self.get_argument("raw", None)
-        # Spec 3-b: 원격 호스트 read (텍스트만, raw 모드는 후속)
+        # Spec 3-b/보완: 원격 호스트 read (텍스트 JSON 또는 raw binary stream)
         if host != "local":
             if not file_path:
                 raise web.HTTPError(400, "path required")
-            if raw_mode is not None:
-                raise web.HTTPError(501, "remote raw read not yet supported")
             from . import ssh_fs
+            ext = ('.' + file_path.rsplit('.', 1)[-1].lower()) if '.' in file_path else ''
+            name = file_path.rsplit('/', 1)[-1]
+            # raw stream 모드: PDF/이미지/HTML 등 binary
+            if (raw_mode is not None
+                    or ext in IMAGE_CONTENT_TYPES
+                    or ext in MEDIA_CONTENT_TYPES):
+                text_raw_types = {
+                    '.html': 'text/html; charset=utf-8',
+                    '.htm':  'text/html; charset=utf-8',
+                    '.svg':  'image/svg+xml',
+                    '.pdf':  'application/pdf',
+                }
+                ct = (
+                    IMAGE_CONTENT_TYPES.get(ext)
+                    or MEDIA_CONTENT_TYPES.get(ext)
+                    or text_raw_types.get(ext)
+                    or 'application/octet-stream'
+                )
+                try:
+                    data, info = ssh_fs.read_binary(host, file_path)
+                except FileNotFoundError:
+                    raise web.HTTPError(404, "Not found: %s" % file_path)
+                except ValueError as e:
+                    raise web.HTTPError(400, str(e))
+                except RuntimeError as e:
+                    raise web.HTTPError(502, "remote raw read failed: %s" % e)
+                self.set_header("Content-Type", ct)
+                self.set_header("Content-Length", str(len(data)))
+                self.set_header("Cache-Control", "no-cache")
+                self.write(data)
+                self.finish()
+                return
+            # 텍스트 JSON
             try:
                 content, size = ssh_fs.read_text(host, file_path)
             except FileNotFoundError:
@@ -573,10 +604,7 @@ class WorkspaceFileHandler(BaseHandler):
                 raise web.HTTPError(400, str(e))
             except RuntimeError as e:
                 raise web.HTTPError(502, "remote read failed: %s" % e)
-            ext = ('.' + file_path.rsplit('.', 1)[-1].lower()) if '.' in file_path else ''
-            name = file_path.rsplit('/', 1)[-1]
             if content is None:
-                # too large or binary
                 self.json_response({
                     "path": file_path, "name": name, "content": None,
                     "extension": ext, "too_large": True, "size": size,
@@ -676,13 +704,7 @@ class WorkspaceRawHandler(BaseHandler):
 
     @web.authenticated
     async def get(self, sub_path):
-        workspace = self.get_workspace()
-        if not is_safe_path(workspace, sub_path):
-            raise web.HTTPError(400, "Invalid path: %s" % sub_path)
-        full_path = (workspace / sub_path).resolve()
-        if not full_path.is_file():
-            raise web.HTTPError(404, "Not found: %s" % sub_path)
-        ext = full_path.suffix.lower()
+        host = self.get_argument("host", "local")
         text_raw_types = {
             '.html': 'text/html; charset=utf-8',
             '.htm':  'text/html; charset=utf-8',
@@ -692,7 +714,39 @@ class WorkspaceRawHandler(BaseHandler):
             '.json': 'application/json; charset=utf-8',
             '.txt':  'text/plain; charset=utf-8',
             '.md':   'text/markdown; charset=utf-8',
+            '.pdf':  'application/pdf',
         }
+        # Spec 3-b 보완: 원격 raw stream
+        if host != "local":
+            from . import ssh_fs
+            ext = ('.' + sub_path.rsplit('.', 1)[-1].lower()) if '.' in sub_path else ''
+            ct = (
+                IMAGE_CONTENT_TYPES.get(ext)
+                or MEDIA_CONTENT_TYPES.get(ext)
+                or text_raw_types.get(ext)
+                or 'application/octet-stream'
+            )
+            try:
+                data, info = ssh_fs.read_binary(host, sub_path)
+            except FileNotFoundError:
+                raise web.HTTPError(404, "Not found: %s" % sub_path)
+            except ValueError as e:
+                raise web.HTTPError(400, str(e))
+            except RuntimeError as e:
+                raise web.HTTPError(502, "remote raw read failed: %s" % e)
+            self.set_header("Content-Type", ct)
+            self.set_header("Content-Length", str(len(data)))
+            self.set_header("Cache-Control", "no-cache, must-revalidate")
+            self.write(data)
+            self.finish()
+            return
+        workspace = self.get_workspace()
+        if not is_safe_path(workspace, sub_path):
+            raise web.HTTPError(400, "Invalid path: %s" % sub_path)
+        full_path = (workspace / sub_path).resolve()
+        if not full_path.is_file():
+            raise web.HTTPError(404, "Not found: %s" % sub_path)
+        ext = full_path.suffix.lower()
         ct = (
             IMAGE_CONTENT_TYPES.get(ext)
             or MEDIA_CONTENT_TYPES.get(ext)
