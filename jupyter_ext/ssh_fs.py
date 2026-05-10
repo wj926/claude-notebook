@@ -70,6 +70,9 @@ def list_dir(host_id, sub_path=""):
         'cd "$HOME" 2>/dev/null || exit 1\n'
         'sub="$1"\n'
         'if [ -n "$sub" ]; then cd "$sub" 2>/dev/null || exit 1; fi\n'
+        # P2 codex audit: symlink escape 차단 — pwd -P 로 physical path 가
+        # $HOME 아래인지 확인. cd 가 symlink 통해 외부로 갔으면 거부.
+        'case "$(pwd -P)" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac\n'
         'find . -mindepth 1 -maxdepth 1 '
         '-printf "%y\\t%s\\t%T@\\t%P\\n" 2>/dev/null | sort\n'
     )
@@ -81,8 +84,9 @@ def list_dir(host_id, sub_path=""):
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"ssh timeout after 30s")
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_path!r}")
     if proc.returncode != 0:
-        # 1 = path 없음, 255 = ssh 자체 fail
         msg = proc.stderr.strip()[:300] or proc.stdout.strip()[:300]
         raise RuntimeError(f"ssh exit {proc.returncode}: {msg}")
 
@@ -125,8 +129,8 @@ def list_dir(host_id, sub_path=""):
     return items
 
 
-# Spec 3-b: 원격 파일 read
-_MAX_TEXT_PREVIEW = 2 * 1024 * 1024  # 2 MB — local 과 동일한 한도
+# Spec 3-b: 원격 파일 read — local 의 _MAX_TEXT_PREVIEW (10 MB) 와 동일
+_MAX_TEXT_PREVIEW = 10 * 1024 * 1024
 
 
 def stat_file(host_id, sub_path):
@@ -142,8 +146,10 @@ def stat_file(host_id, sub_path):
     remote_script = (
         'cd "$HOME" 2>/dev/null || exit 1\n'
         'sub="$1"\n'
+        # P2: symlink escape 차단 — realpath 결과가 $HOME 하위인지 확인
+        'abs=$(realpath -m -- "$sub" 2>/dev/null)\n'
+        'case "$abs" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac\n'
         'if [ ! -f "$sub" ]; then exit 2; fi\n'
-        # %s = size, %Y = mtime sec, %.Y = mtime with ns fractional
         'stat -c "%s %Y %.Y" "$sub"\n'
     )
     cmd = _ssh_base(host_id) + ["sh", "-s", "--", sub]
@@ -156,6 +162,8 @@ def stat_file(host_id, sub_path):
         raise RuntimeError("ssh timeout")
     if proc.returncode == 2:
         return None
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_path!r}")
     if proc.returncode != 0:
         raise RuntimeError(f"ssh exit {proc.returncode}: {proc.stderr.strip()[:200]}")
     parts = proc.stdout.strip().split()
@@ -189,13 +197,18 @@ def read_text(host_id, sub_path, max_size=_MAX_TEXT_PREVIEW):
     sub = _safe_subpath(sub_path)
     remote_script = (
         'cd "$HOME" 2>/dev/null || exit 1\n'
-        'cat "$1"\n'
+        'sub="$1"\n'
+        'abs=$(realpath -m -- "$sub" 2>/dev/null)\n'
+        'case "$abs" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac\n'
+        'cat "$sub"\n'
     )
     cmd = _ssh_base(host_id) + ["sh", "-s", "--", sub]
     proc = subprocess.run(
         cmd, input=remote_script.encode("utf-8"),
         capture_output=True, timeout=30,
     )
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_path!r}")
     if proc.returncode != 0:
         raise RuntimeError(f"ssh cat failed: {proc.stderr.decode('utf-8', 'replace')[:200]}")
     try:
@@ -221,13 +234,21 @@ def read_binary(host_id, sub_path, max_size=_MAX_BINARY_RAW):
     if info["size"] > max_size:
         raise RuntimeError(f"file too large ({info['size']} bytes > {max_size})")
     sub = _safe_subpath(sub_path)
-    remote_cmd = 'cd "$HOME" 2>/dev/null || exit 1; cat "$1"'
+    remote_cmd = (
+        'cd "$HOME" 2>/dev/null || exit 1; '
+        'sub="$1"; '
+        'abs=$(realpath -m -- "$sub" 2>/dev/null); '
+        'case "$abs" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac; '
+        'cat "$sub"'
+    )
     remote_full = "sh -c " + shlex.quote(remote_cmd) + " _ " + shlex.quote(sub)
     cmd = _ssh_base(host_id) + [remote_full]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=120)
     except subprocess.TimeoutExpired:
         raise RuntimeError("ssh cat timeout")
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_path!r}")
     if proc.returncode != 0:
         raise RuntimeError(
             f"ssh cat exit {proc.returncode}: "
@@ -263,6 +284,9 @@ def write_text(host_id, sub_path, content, expected_version=None):
     remote_cmd = (
         'set -e; cd "$HOME"; '
         'sub="$1"; expected="$2"; '
+        # P2: symlink escape 차단 — realpath 가 $HOME 하위가 아니면 거부
+        'abs=$(realpath -m -- "$sub" 2>/dev/null); '
+        'case "$abs" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac; '
         # flock — 같은 파일 임계구역. -x exclusive, -w 30 wait 30s.
         '(flock -x -w 30 9 || { echo "flock timeout" >&2; exit 4; }; '
         '  if [ -n "$expected" ] && [ -f "$sub" ]; then '
@@ -296,7 +320,6 @@ def write_text(host_id, sub_path, content, expected_version=None):
     except subprocess.TimeoutExpired:
         raise RuntimeError("ssh save timeout")
     if proc.returncode == 9:
-        # version mismatch — stderr 의 MISMATCH:<actual> 파싱
         stderr = proc.stderr.decode("utf-8", "replace")
         actual = ""
         for line in stderr.splitlines():
@@ -304,6 +327,8 @@ def write_text(host_id, sub_path, content, expected_version=None):
                 actual = line[len("MISMATCH:"):].strip()
                 break
         raise VersionMismatch(expected, actual)
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_path!r}")
     if proc.returncode != 0:
         raise RuntimeError(
             f"ssh save exit {proc.returncode}: "
@@ -324,7 +349,12 @@ def upload_file(host_id, sub_dir, name, content_bytes):
     remote_cmd = (
         'set -e; cd "$HOME"; '
         'sub="$1"; orig="$2"; '
-        'if [ -n "$sub" ]; then mkdir -p "$sub" && cd "$sub"; fi; '
+        # P2: 대상 디렉토리 escape 차단
+        'if [ -n "$sub" ]; then '
+        '  abs=$(realpath -m -- "$sub" 2>/dev/null); '
+        '  case "$abs" in "$HOME"|"$HOME"/*) ;; *) exit 7;; esac; '
+        '  mkdir -p "$sub" && cd "$sub"; '
+        'fi; '
         'name="$orig"; i=1; '
         'while [ -e "$name" ]; do '
         '  ext=""; base="$orig"; '
@@ -349,6 +379,8 @@ def upload_file(host_id, sub_dir, name, content_bytes):
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError("ssh upload timeout")
+    if proc.returncode == 7:
+        raise ValueError(f"path escapes HOME: {sub_dir!r}")
     if proc.returncode != 0:
         raise RuntimeError(
             f"ssh upload exit {proc.returncode}: "
