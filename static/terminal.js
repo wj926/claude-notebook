@@ -1596,11 +1596,28 @@ renameBtn.addEventListener('click', async () => {
 });
 
 // === URL hash navigation for terminal bookmarking ===
-function connectFromHash() {
+async function connectFromHash() {
     const hash = decodeURIComponent(location.hash.slice(1));
-    if (hash && terminalData[hash] && hash !== currentName) {
-        connectTerminal(hash);
+    if (!hash) return;
+    if (terminalData[hash]) {
+        if (hash !== currentName) connectTerminal(hash);
+        return;
     }
+    // hash 지정됐는데 backend 에 그 터미널 없음 (서버 재시작으로 wipe 되거나
+    // tab 이 옛 버전에서 persisted). 사용자 입장에선 "터미널 사라짐" 으로
+    // 보임 → 자동으로 새 터미널 생성해서 연결 (silent fallback).
+    try {
+        const xsrf = getXsrf();
+        const res = await fetch(JUPYTER + '/api/terminals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-XSRFToken': xsrf },
+            credentials: 'same-origin',
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        await loadTerminals();
+        connectTerminal(data.name);
+    } catch (_) {}
 }
 
 loadTerminalOrder();
