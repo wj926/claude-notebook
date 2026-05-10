@@ -210,24 +210,30 @@ function onMountTab(e) {
     return;
   }
 
+  // 'term' kind: 옛 legacy 터미널 페이지 (chat 토글 + 파일 attach + 가상키보드
+  // + textarea input bar 풀세트) 를 iframe 으로. terminal.js 의 connectFromHash
+  // 가 #<name> 보고 자동 연결.
+  if (tab.kind === 'term') {
+    if (hostEl.querySelector('iframe[data-term-frame]')) return;
+    const ifr = document.createElement('iframe');
+    ifr.dataset.termFrame = '1';
+    ifr.dataset.tabId = tab.id;
+    ifr.src = `${BASE}/legacy-terminal#${encodeURIComponent(tab.contentRef)}`;
+    ifr.style.cssText = 'width:100%;height:100%;border:0;display:block;background:var(--bg)';
+    hostEl.appendChild(ifr);
+    return;
+  }
+
   let inst = instances.get(tab.id);
   if (inst && inst._mountedHost === hostEl) {
     inst.fit?.();
     return;
   }
   if (!inst) {
-    if (tab.kind === 'term') {
-      inst = new TerminalInstance({ name: tab.contentRef });
-    } else {
-      inst = new FileViewerInstance();
-    }
+    inst = new FileViewerInstance();  // dead path (kind:'file' 안 씀, B 방향)
     instances.set(tab.id, inst);
   }
-  if (tab.kind === 'term') {
-    inst.mount(hostEl);
-  } else {
-    inst.mount(hostEl, tab.contentRef);
-  }
+  inst.mount(hostEl, tab.contentRef);
   inst._mountedHost = hostEl;
 }
 
