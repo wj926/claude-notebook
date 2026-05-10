@@ -31,8 +31,21 @@ async function refresh() {
     if (!r.ok) return;
     const data = await r.json();
     hosts = data.hosts || [];
-    currentId = data.current_id || 'local';
+    // Spec 3: URL ?host=<id> 로 진입한 경우 (또는 백엔드 inject __INITIAL_HOST)
+    // 그 host 를 우선 사용. 그 외엔 서버 저장 current_id.
+    const initial = window.__INITIAL_HOST;
+    currentId = (initial && initial.length) ? initial : (data.current_id || 'local');
     window.__currentHostId = currentId;
+    // 서버 current_id 와 다르면 PUT 으로 sync (다음 refresh 에서 같은 값)
+    if (initial && initial !== data.current_id) {
+      try {
+        await fetch(`${BASE}/api/current_host`, mutFetchOpts({
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: initial }),
+        }));
+      } catch (_) {}
+    }
   } catch (_) {}
 }
 
@@ -77,7 +90,16 @@ function openDD(dd) {
       return;
     }
     dd.hidden = true;
-    await switchTo(b.dataset.id);
+    const targetId = b.dataset.id;
+    // 사용자 선택 (A): 다른 host 클릭 시 새 chrome 탭 으로 열기.
+    // 현 탭 = 한 host (이미 그 host 인 거 클릭은 noop).
+    if (targetId !== currentId) {
+      const url = (targetId === 'local')
+        ? (BASE || '/claude-notebook')
+        : `${BASE || '/claude-notebook'}?host=${encodeURIComponent(targetId)}`;
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
   }));
 }
 

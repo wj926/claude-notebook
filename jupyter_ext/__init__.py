@@ -425,6 +425,11 @@ class WorkspaceTerminalHandler(BaseHandler):
         if focus is None and "/terminal" in self.request.path:
             focus = "terminal"
 
+        # Spec 3: ?host=<id> 로 진입하면 그 호스트 환경으로 boot (각 chrome 탭
+        # = 한 host 모델). __INITIAL_HOST 주입 → frontend 가 currentHostId 로
+        # 사용 + localStorage key 도 host 별 분리.
+        initial_host = self.get_argument("host", "")
+
         html = STATIC_DIR.joinpath("index.html").read_text(encoding="utf-8")
         html = html.replace("<head>", f'<head>\n<base href="{viewer_base}/">', 1)
         html = self.inject_script(
@@ -433,6 +438,10 @@ class WorkspaceTerminalHandler(BaseHandler):
             __JUPYTER_BASE=base_url,
             __XSRF_TOKEN=xsrf,
             __FOCUS=focus or "",
+            __INITIAL_HOST=initial_host,
+            # currentHostId 즉시 set — ssh-chip refresh 전에 + 버튼 누를 때
+            # window.__currentHostId 참조해도 정확한 host 로 새 터미널 생성
+            __currentHostId=initial_host or "local",
         )
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.set_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")

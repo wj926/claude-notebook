@@ -2,7 +2,10 @@ let nextTabId = 1;
 const tabs = new Map();
 const subs = [];
 
-const STORAGE_KEY = 'cn-v2-tabs';
+// Spec 3: host 별 별도 localStorage 키 — 각 chrome 탭이 다른 host 를
+// 가리킬 때 탭 list 가 섞이지 않도록.
+const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || '';
+const STORAGE_KEY = _h ? `cn-v2-tabs-${_h}` : 'cn-v2-tabs';
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({

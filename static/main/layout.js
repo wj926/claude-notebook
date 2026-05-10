@@ -10,7 +10,8 @@ state.activeLeafId = state.leaves[0].id;
 
 let mountEl;
 const subs = [];
-const STORAGE_KEY = 'cn-v2-layout';
+const _h = (typeof window !== 'undefined' && window.__INITIAL_HOST) || '';
+const STORAGE_KEY = _h ? `cn-v2-layout-${_h}` : 'cn-v2-layout';
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
